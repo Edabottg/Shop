@@ -151,3 +151,133 @@ async function openCity(cityId) {
        <b>${esc(s.name)}</b>
        ${s.description ? `<div class="muted">${esc(s.description)}</div>` : ''}
      </button>`).join('');
+  app.innerHTML = html;
+}
+
+async function openShop(shopId, shopName) {
+  const { data, error } = await db.from('products').select('*')
+    .eq('shop_id', shopId).eq('in_stock', true).order('sort_order');
+  if (error) return showError(error);
+  view = { shopId, shopName, products: data };
+  renderProducts();
+}
+
+function renderProducts() {
+  screen = 'products';
+  let html = `<button class="back" onclick="openCity(${currentCityId})">← Магазины</button>` +
+    `<h1>${esc(view.shopName)}</h1>`;
+  if (view.products.length === 0) html += '<p class="muted">В этом магазине пока нет товаров.</p>';
+  html += view.products.map(p => {
+    const qty = qtyIn(view.shopId, p.id);
+    return `<div class="card">
+      <b>${esc(p.name)}</b>
+      ${p.description ? `<div class="muted">${esc(p.description)}</div>` : ''}
+      ${p.image_url ? `<img src="${esc(p.image_url)}" alt="">` : ''}
+      <div class="price">${p.price_rub} ₽</div>
+      ${qty
+        ? `<div class="qty">
+             <button onclick="changeQty(${view.shopId}, ${p.id}, -1)">−</button>
+             <span>${qty}</span>
+             <button onclick="changeQty(${view.shopId}, ${p.id}, 1)">+</button>
+           </div>`
+        : `<button class="add" onclick="addToCart(${p.id})">В корзину</button>`}
+    </div>`;
+  }).join('');
+  html += cartBar();
+  app.innerHTML = html;
+}
+
+function openCart() {
+  if (cartCount() === 0) return showCities();
+  screen = 'cart';
+  let html = `<button class="back" onclick="${view ? 'renderProducts()' : 'showCities()'}">← Назад</button>` +
+    '<h1>Корзина</h1>';
+  for (const shop of Object.values(cart.shops)) {
+    const items = Object.values(shop.items);
+    const subtotal = items.reduce((s, i) => s + i.qty * i.price_rub, 0);
+    html += `<div class="shop-title">${esc(shop.shopName)}</div>`;
+    html += items.map(i => `<div class="card">
+        <b>${esc(i.name)}</b>
+        <div class="price">${i.price_rub} ₽ × ${i.qty} = ${i.price_rub * i.qty} ₽</div>
+        <div class="qty">
+          <button onclick="changeQty(${shop.shopId}, ${i.id}, -1)">−</button>
+          <span>${i.qty}</span>
+          <button onclick="changeQty(${shop.shopId}, ${i.id}, 1)">+</button>
+        </div>
+      </div>`).join('');
+    html += `<p class="muted">Заказ из этого магазина: ${subtotal} ₽</p>`;
+  }
+  html += `<p class="price">Итого: ${cartTotal()} ₽</p>
+    <p class="muted">Каждый магазин оформляется отдельным заказом, и вам придёт отдельное сообщение.</p>
+    <button class="add" onclick="openForm()">Оформить заказ</button>`;
+  app.innerHTML = html;
+}
+
+function openForm() {
+  screen = 'form';
+  app.innerHTML = `
+    <button class="back" onclick="openCart()">← Корзина</button>
+    <h1>Оформление заказа</h1>
+    <div class="form">
+      <label>Имя<input id="f_name" type="text"></label>
+      <label>Телефон<input id="f_phone" type="tel" placeholder="+7"></label>
+      <label>Доставка
+        <select id="f_type" onchange="updateAddrLabel()">
+          <option value="hotel">В отель</option>
+          <option value="apartment">В квартиру</option>
+        </select>
+      </label>
+      <label id="f_addr_label">Название отеля и номер комнаты
+        <textarea id="f_addr" rows="3"></textarea>
+      </label>
+      <button class="add" id="f_submit" onclick="submitOrder()">Отправить заказ</button>
+      <p id="f_msg" class="muted"></p>
+    </div>`;
+}
+
+function updateAddrLabel() {
+  const isHotel = document.getElementById('f_type').value === 'hotel';
+  document.getElementById('f_addr_label').firstChild.textContent = isHotel
+    ? 'Название отеля и номер комнаты'
+    : 'Адрес: улица, дом, подъезд, этаж, квартира';
+}
+
+async function submitOrder() {
+  const msg = document.getElementById('f_msg');
+  const btn = document.getElementById('f_submit');
+  const body = {
+    orders: Object.values(cart.shops).map(s => ({
+      shop_id: s.shopId,
+      items: Object.values(s.items).map(i => ({ id: i.id, qty: i.qty })),
+    })),
+    customer_name: document.getElementById('f_name').value.trim(),
+    phone: document.getElementById('f_phone').value.trim(),
+    delivery_type: document.getElementById('f_type').value,
+    address: document.getElementById('f_addr').value.trim(),
+  };
+  if (!body.customer_name || !body.phone || !body.address) {
+    msg.textContent = 'Заполните все поля.';
+    return;
+  }
+  btn.disabled = true;
+  msg.textContent = 'Отправляем...';
+
+  const { data, error } = await db.functions.invoke('send-order', { body });
+  if (error || !data?.ok) {
+    btn.disabled = false;
+    msg.textContent = 'Не удалось отправить: ' + (data?.error || error?.message || 'ошибка');
+    return;
+  }
+
+  const list = data.orders.map(o =>
+    `<p>Заказ №${o.order_id} · ${esc(o.shop_name)} · ${o.total} ₽</p>`).join('');
+  emptyCart();
+  app.innerHTML = `<h1>Спасибо!</h1>${list}
+    <p><b>Итого: ${data.total} ₽.</b> Мы свяжемся с вами по телефону.</p>
+    <button class="add" onclick="showCities()">В каталог</button>`;
+}
+
+showCities();
+</script>
+</body>
+</html>
