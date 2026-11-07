@@ -1,1 +1,90 @@
-sb_publishable_jIxy3j0mu8dLYCpa4T1hyg_npMmhEwD
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Магазин</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px;
+         background: var(--tg-theme-bg-color, #fff); color: var(--tg-theme-text-color, #000); }
+  h1 { font-size: 20px; margin: 8px 0 12px; }
+  .card { display: block; width: 100%; text-align: left; padding: 14px; margin: 8px 0;
+          border: none; border-radius: 12px; font-size: 16px; color: inherit;
+          background: var(--tg-theme-secondary-bg-color, #f1f1f1); }
+  .back { background: none; border: none; color: var(--tg-theme-link-color, #2481cc);
+          font-size: 16px; padding: 0; margin-bottom: 8px; }
+  .price { font-weight: bold; margin-top: 4px; }
+  .muted { color: #888; font-size: 14px; }
+  img { max-width: 100%; border-radius: 10px; margin-top: 6px; }
+</style>
+</head>
+<body>
+<div id="app">Загрузка...</div>
+
+<script>
+const SUPABASE_URL = 'sb_publishable_jIxy3j0mu8dLYCpa4T1hyg_npMmhEwD';
+const SUPABASE_ANON_KEY = 'sb_publishable_jIxy3j0mu8dLYCpa4T1hyg_npMmhEwD';
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const tg = window.Telegram?.WebApp;
+tg?.ready();
+tg?.expand();
+
+const app = document.getElementById('app');
+let currentCityId = null;
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function showError(error) {
+  app.innerHTML = '<p>Ошибка загрузки: ' + esc(error.message) + '</p>';
+}
+
+async function showCities() {
+  const { data, error } = await db.from('cities').select('*').order('sort_order');
+  if (error) return showError(error);
+  app.innerHTML = '<h1>Выберите город</h1>' +
+    data.map(c => `<button class="card" onclick="openCity(${c.id})">${esc(c.name)}</button>`).join('');
+}
+
+async function openCity(cityId) {
+  currentCityId = cityId;
+  const { data, error } = await db.from('shops').select('*')
+    .eq('city_id', cityId).order('sort_order');
+  if (error) return showError(error);
+  let html = '<button class="back" onclick="showCities()">← Города</button>' +
+    '<h1>Магазины</h1>';
+  if (data.length === 0) html += '<p class="muted">В этом городе пока нет магазинов.</p>';
+  html += data.map(s =>
+    `<button class="card" onclick="openShop(${s.id})">
+       <b>${esc(s.name)}</b>
+       ${s.description ? `<div class="muted">${esc(s.description)}</div>` : ''}
+     </button>`).join('');
+  app.innerHTML = html;
+}
+
+async function openShop(shopId) {
+  const { data, error } = await db.from('products').select('*')
+    .eq('shop_id', shopId).eq('in_stock', true).order('sort_order');
+  if (error) return showError(error);
+  let html = `<button class="back" onclick="openCity(${currentCityId})">← Магазины</button>` +
+    '<h1>Товары</h1>';
+  if (data.length === 0) html += '<p class="muted">В этом магазине пока нет товаров.</p>';
+  html += data.map(p => `
+    <div class="card">
+      <b>${esc(p.name)}</b>
+      ${p.description ? `<div class="muted">${esc(p.description)}</div>` : ''}
+      ${p.image_url ? `<img src="${esc(p.image_url)}" alt="">` : ''}
+      <div class="price">${p.price_rub} ₽</div>
+    </div>`).join('');
+  app.innerHTML = html;
+}
+
+showCities();
+</script>
+</body>
+</html>
