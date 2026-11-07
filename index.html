@@ -7,17 +7,30 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px;
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px 16px 90px;
          background: var(--tg-theme-bg-color, #fff); color: var(--tg-theme-text-color, #000); }
   h1 { font-size: 20px; margin: 8px 0 12px; }
+  .shop-title { font-size: 17px; margin: 20px 0 4px; color: var(--tg-theme-hint-color, #888); }
   .card { display: block; width: 100%; text-align: left; padding: 14px; margin: 8px 0;
-          border: none; border-radius: 12px; font-size: 16px; color: inherit;
+          border: none; border-radius: 12px; font-size: 16px; color: inherit; box-sizing: border-box;
           background: var(--tg-theme-secondary-bg-color, #f1f1f1); }
   .back { background: none; border: none; color: var(--tg-theme-link-color, #2481cc);
           font-size: 16px; padding: 0; margin-bottom: 8px; }
   .price { font-weight: bold; margin-top: 4px; }
   .muted { color: #888; font-size: 14px; }
   img { max-width: 100%; border-radius: 10px; margin-top: 6px; }
+  .add { width: 100%; padding: 14px; margin-top: 8px; border: none; border-radius: 12px; font-size: 16px;
+         background: var(--tg-theme-button-color, #2481cc); color: var(--tg-theme-button-text-color, #fff); }
+  .qty { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 8px; }
+  .qty button { width: 44px; height: 44px; border: none; border-radius: 10px; font-size: 22px;
+                background: var(--tg-theme-button-color, #2481cc); color: var(--tg-theme-button-text-color, #fff); }
+  .qty span { font-size: 18px; min-width: 24px; text-align: center; }
+  .cartbar { position: fixed; left: 12px; right: 12px; bottom: 12px; padding: 14px; border-radius: 12px;
+             text-align: center; font-weight: bold; cursor: pointer;
+             background: var(--tg-theme-button-color, #2481cc); color: var(--tg-theme-button-text-color, #fff); }
+  .form label { display: block; margin: 12px 0; font-size: 14px; }
+  .form input, .form select, .form textarea { width: 100%; box-sizing: border-box; padding: 10px;
+    margin-top: 4px; font-size: 16px; border-radius: 8px; border: 1px solid #ccc; }
 </style>
 </head>
 <body>
@@ -34,6 +47,8 @@ tg?.expand();
 
 const app = document.getElementById('app');
 let currentCityId = null;
+let view = null;
+let screen = 'cities';
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c =>
@@ -44,47 +59,95 @@ function showError(error) {
   app.innerHTML = '<p>Ошибка загрузки: ' + esc(error.message) + '</p>';
 }
 
+// ---------- Корзина: {shops: {shopId: {shopId, shopName, items: {productId: {...}}}}} ----------
+function loadCart() {
+  try {
+    return JSON.parse(localStorage.getItem('cart_v2')) || { shops: {} };
+  } catch (e) {
+    return { shops: {} };
+  }
+}
+let cart = loadCart();
+
+function saveCart() {
+  try { localStorage.setItem('cart_v2', JSON.stringify(cart)); } catch (e) {}
+}
+function emptyCart() {
+  cart = { shops: {} };
+  saveCart();
+}
+function cartCount() {
+  return Object.values(cart.shops).reduce((s, sh) =>
+    s + Object.values(sh.items).reduce((t, i) => t + i.qty, 0), 0);
+}
+function cartTotal() {
+  return Object.values(cart.shops).reduce((s, sh) =>
+    s + Object.values(sh.items).reduce((t, i) => t + i.qty * i.price_rub, 0), 0);
+}
+function shopCount() {
+  return Object.keys(cart.shops).length;
+}
+function qtyIn(shopId, productId) {
+  return cart.shops[shopId]?.items[productId]?.qty || 0;
+}
+
+function addToCart(productId) {
+  const sid = view.shopId;
+  const p = view.products.find(x => x.id === productId);
+  if (!cart.shops[sid]) cart.shops[sid] = { shopId: sid, shopName: view.shopName, items: {} };
+  const shop = cart.shops[sid];
+  const it = shop.items[productId] || { id: p.id, name: p.name, price_rub: p.price_rub, qty: 0 };
+  it.qty += 1;
+  shop.items[productId] = it;
+  saveCart();
+  renderProducts();
+}
+
+function changeQty(shopId, productId, delta) {
+  const shop = cart.shops[shopId];
+  if (!shop || !shop.items[productId]) return;
+  const it = shop.items[productId];
+  it.qty += delta;
+  if (it.qty <= 0) delete shop.items[productId];
+  if (Object.keys(shop.items).length === 0) delete cart.shops[shopId];
+  saveCart();
+  if (screen === 'cart') {
+    openCart();
+  } else {
+    renderProducts();
+  }
+}
+
+function cartBar() {
+  if (cartCount() === 0) return '';
+  return `<div class="cartbar" onclick="openCart()">
+    Корзина: ${cartCount()} шт. · ${cartTotal()} ₽ · магазинов: ${shopCount()} →</div>`;
+}
+
+// ---------- Экраны ----------
 async function showCities() {
+  screen = 'cities';
   const { data, error } = await db.from('cities').select('*').order('sort_order');
   if (error) return showError(error);
-  app.innerHTML = '<h1>Выберите город</h1>' +
+  let html = '<h1>Выберите город</h1>' +
     data.map(c => `<button class="card" onclick="openCity(${c.id})">${esc(c.name)}</button>`).join('');
+  if (cartCount() > 0) {
+    html += `<button class="card" onclick="openCart()"><b>Корзина</b><br>
+      ${cartCount()} шт. · ${cartTotal()} ₽ · магазинов: ${shopCount()}</button>`;
+  }
+  app.innerHTML = html;
 }
 
 async function openCity(cityId) {
   currentCityId = cityId;
+  screen = 'shops';
   const { data, error } = await db.from('shops').select('*')
     .eq('city_id', cityId).order('sort_order');
   if (error) return showError(error);
-  let html = '<button class="back" onclick="showCities()">← Города</button>' +
-    '<h1>Магазины</h1>';
+  let html = '<button class="back" onclick="showCities()">← Города</button><h1>Магазины</h1>';
   if (data.length === 0) html += '<p class="muted">В этом городе пока нет магазинов.</p>';
   html += data.map(s =>
-    `<button class="card" onclick="openShop(${s.id})">
+    `<button class="card" onclick="openShop(${s.id}, ${JSON.stringify(s.name).replace(/"/g, '&quot;')})">
        <b>${esc(s.name)}</b>
        ${s.description ? `<div class="muted">${esc(s.description)}</div>` : ''}
      </button>`).join('');
-  app.innerHTML = html;
-}
-
-async function openShop(shopId) {
-  const { data, error } = await db.from('products').select('*')
-    .eq('shop_id', shopId).eq('in_stock', true).order('sort_order');
-  if (error) return showError(error);
-  let html = `<button class="back" onclick="openCity(${currentCityId})">← Магазины</button>` +
-    '<h1>Товары</h1>';
-  if (data.length === 0) html += '<p class="muted">В этом магазине пока нет товаров.</p>';
-  html += data.map(p => `
-    <div class="card">
-      <b>${esc(p.name)}</b>
-      ${p.description ? `<div class="muted">${esc(p.description)}</div>` : ''}
-      ${p.image_url ? `<img src="${esc(p.image_url)}" alt="">` : ''}
-      <div class="price">${p.price_rub} ₽</div>
-    </div>`).join('');
-  app.innerHTML = html;
-}
-
-showCities();
-</script>
-</body>
-</html>
