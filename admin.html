@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Админка</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; max-width: 720px; }
+  h2 { margin: 28px 0 8px; font-size: 18px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+  input, select, textarea { width: 100%; box-sizing: border-box; padding: 8px; margin: 4px 0 10px;
+    font-size: 15px; border: 1px solid #bbb; border-radius: 6px; }
+  input[type=checkbox] { width: auto; }
+  button { padding: 8px 14px; margin: 0 6px 8px 0; border: none; border-radius: 6px;
+    background: #2481cc; color: #fff; font-size: 14px; cursor: pointer; }
+  button.secondary { background: #888; }
+  button.danger { background: #c0392b; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #eee; }
+  .row span { flex: 1; }
+  .muted { color: #888; font-size: 13px; }
+  .thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
+  .err { color: #c0392b; min-height: 20px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+
+<div id="login" class="hidden">
+  <h2>Вход в админку</h2>
+  <input id="email" type="email" placeholder="Email">
+  <input id="password" type="password" placeholder="Пароль">
+  <button onclick="login()">Войти</button>
+  <p id="loginMsg" class="err"></p>
+</div>
+
+<div id="panel" class="hidden">
+  <div class="row"><span><b>Админка</b></span><button class="secondary" onclick="logout()">Выйти</button></div>
+  <p id="msg" class="err"></p>
+
+  <h2>Города</h2>
+  <div id="cities"></div>
+  <input id="newCity" placeholder="Новый город">
+  <button onclick="addCity()">Добавить город</button>
+
+  <h2>Магазины</h2>
+  <select id="citySelect" onchange="loadShops()"></select>
+  <div id="shops"></div>
+  <input id="shopName" placeholder="Название магазина">
+  <input id="shopDesc" placeholder="Описание (необязательно)">
+  <input id="shopPhone" placeholder="Телефон (необязательно)">
+  <button onclick="addShop()">Добавить магазин</button>
+
+  <h2>Товары</h2>
+  <select id="shopSelect" onchange="loadProducts()"></select>
+  <div id="products"></div>
+
+  <h2 id="formTitle">Новый товар</h2>
+  <input id="pName" placeholder="Название">
+  <textarea id="pDesc" rows="2" placeholder="Описание (необязательно)"></textarea>
+  <input id="pPrice" type="number" placeholder="Цена, ₽">
+  <input id="pImage" type="file" accept="image/*">
+  <p class="muted" id="pImageNote"></p>
+  <label><input type="checkbox" id="pStock" checked> В наличии</label>
+  <div style="margin-top: 10px">
+    <button onclick="saveProduct()">Сохранить товар</button>
+    <button class="secondary" onclick="clearProductForm()">Очистить форму</button>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://uwafdyrpyrcnjliwystd.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_jIxy3j0mu8dLYCpa4T1hyg_npMmhEwD';
+const BUCKET = 'product-images';
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const $ = id => document.getElementById(id);
+
+let cities = [], shops = [], products = [];
+let editId = null, currentImageUrl = null;
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function say(text) { $('msg').textContent = text; }
+
+// ---------- Вход ----------
+async function init() {
+  const { data } = await db.auth.getSession();
+  if (data.session) showPanel();
+  else $('login').classList.remove('hidden');
+}
+
+async function login() {
+  const { error } = await db.auth.signInWithPassword({
+    email: $('email').value.trim(),
+    password: $('password').value,
+  });
+  if (error) { $('loginMsg').textContent = 'Неверный email или пароль'; return; }
+  showPanel();
+}
+
+async function logout() {
+  await db.auth.signOut();
+  location.reload();
+}
+
+function showPanel() {
+  $('login').classList.add('hidden');
+  $('panel').classList.remove('hidden');
+  loadCities();
+}
+
+// ---------- Города ----------
+async function loadCities() {
+  const { data, error } = await db.from('cities').select('*').order('sort_order');
+  if (error) return say(error.message);
+  cities = data;
+  $('citySelect').innerHTML = cities.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  $('cities').innerHTML = cities.map(c => `
+    <div class="row">
+      <span>${esc(c.name)}</span>
+      <button class="danger" onclick="delRow('cities', ${c.id}, 'Удалить город со всеми магазинами и товарами?')">Удалить</button>
+    </div>`).join('') || '<p class="muted">Городов пока нет</p>';
+  loadShops();
+}
+
+async function addCity() {
+  const name = $('newCity').value.trim();
+  if (!name) return;
+  const { error } = await db.from('cities').insert({ name, sort_order: cities.length + 1 });
+  if (error) return say(error.message);
+  $('newCity').value = '';
+  loadCities();
+}
+
+// ---------- Магазины ----------
+async function loadShops() {
+  const cityId = $('citySelect').value;
+  if (!cityId) {
+    shops = [];
+    renderShops();
+    return loadProducts();
+  }
+  const { data, error } = await db.from('shops').select('*')
+    .eq('city_id', cityId).order('sort_order');
+  if (error) return say(error.message);
+  shops = data;
+  renderShops();
+  loadProducts();
+}
+
+function renderShops() {
+  $('shops').innerHTML = shops.map(s => `
+    <div class="row">
+      <span><b>${esc(s.name)}</b>${s.phone ? ' · ' + esc(s.phone) : ''}</span>
+      <button class="danger" onclick="delRow('shops', ${s.id}, 'Удалить магазин со всеми товарами?')">Удалить</button>
+    </div>`).join('') || '<p class="muted">В этом городе магазинов нет</p>';
+  $('shopSelect').innerHTML = shops.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+}
+
+async function addShop() {
+  const cityId = Number($('citySelect').value);
+  const name = $('shopName').value.trim();
+  if (!cityId || !name) return say('Выберите город и введите название магазина');
+  const { error } = await db.from('shops').insert({
+    city_id: cityId,
+    name,
+    description: $('shopDesc').value.trim() || null,
+    phone: $('shopPhone').value.trim() || null,
+    sort_order: shops.length + 1,
+  });
+  if (error) return say(error.message);
+  ['shopName', 'shopDesc', 'shopPhone'].forEach(id => $(id).value = '');
+  loadShops();
+}
+
+// ---------- Товары ----------
+async function loadProducts() {
+  const shopId = $('shopSelect').value;
+  if (!shopId) {
+    products = [];
+    renderProducts();
+    return;
+  }
+  const { data, error } = await db.from('products').select('*')
+    .eq('shop_id', shopId).order('sort_order');
+  if (error) return say(error.message);
+  products = data;
+  renderProducts();
+}
+
+function renderProducts() {
+  $('products').innerHTML = products.map(p => `
+    <div class="row">
+      ${p.image_url ? `<img class="thumb" src="${esc(p.image_url)}" alt="">` : '<div class="thumb"></div>'}
+      <span><b>${esc(p.name)}</b><br>${p.price_rub} ₽ ·
+        ${p.in_stock ? 'в наличии' : '<span class="muted">нет в наличии</span>'}</span>
+      <button class="secondary" onclick="editProduct(${p.id})">Изменить</button>
+      <button class="danger" onclick="delRow('products', ${p.id}, 'Удалить товар?')">Удалить</button>
+    </div>`).join('') || '<p class="muted">В этом магазине товаров нет</p>';
+}
+
+function editProduct(id) {
+  const p = products.find(x => x.id === id);
+  editId = p.id;
+  currentImageUrl = p.image_url;
+  $('pName').value = p.name;
+  $('pDesc').value = p.description || '';
+  $('pPrice').value = p.price_rub;
+  $('pStock').checked = p.in_stock;
+  $('pImage').value = '';
+  $('pImageNote').textContent = p.image_url
+    ? 'Фото уже есть. Выберите новое, чтобы заменить.'
+    : 'Фото нет.';
+  $('formTitle').textContent = 'Редактирование товара';
+  $('formTitle').scrollIntoView();
+}
+
+function clearProductForm() {
+  editId = null;
+  currentImageUrl = null;
+  ['pName', 'pDesc', 'pPrice'].forEach(id => $(id).value = '');
+  $('pImage').value = '';
+  $('pStock').checked = true;
+  $('pImageNote').textContent = '';
+  $('formTitle').textContent = 'Новый товар';
+}
+
+async function saveProduct() {
+  const shopId = Number($('shopSelect').value);
+  const name = $('pName').value.trim();
+  const price = parseInt($('pPrice').value);
+  if (!shopId) return say('Сначала выберите магазин');
+  if (!name || !price) return say('Укажите название и цену');
+
+  let imageUrl = currentImageUrl;
+  const file = $('pImage').files[0];
+  if (file) {
+    const safeName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
+    const path = `${Date.now()}-${safeName}`;
+    const { error: upErr } = await db.storage.from(BUCKET).upload(path, file);
+    if (upErr) return say('Фото: ' + upErr.message);
+    imageUrl = db.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+  }
+
+  const row = {
+    shop_id: shopId,
+    name,
+    description: $('pDesc').value.trim() || null,
+    price_rub: price,
+    image_url: imageUrl,
+    in_stock: $('pStock').checked,
+  };
+
+  const request = editId
+    ? db.from('products').update(row).eq('id', editId)
+    : db.from('products').insert(row);
+  const { error } = await request;
+  if (error) return say(error.message);
+
+  say('Товар сохранён');
+  clearProductForm();
+  loadProducts();
+}
+
+// ---------- Удаление ----------
+async function delRow(table, id, question) {
+  if (!confirm(question)) return;
+  const { error } = await db.from(table).delete().eq('id', id);
+  if (error) return say(error.message);
+  loadCities();
+}
+
+init();
+</script>
+</body>
+</html>
