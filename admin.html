@@ -17,8 +17,9 @@
   button.danger { background: #c0392b; }
   .row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #eee; }
   .row span { flex: 1; }
+  .row input[type=file] { width: 130px; margin: 0; font-size: 12px; }
   .muted { color: #888; font-size: 13px; }
-  .thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
+  .thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; flex-shrink: 0; background: #eee; }
   .err { color: #c0392b; min-height: 20px; }
   .hidden { display: none; }
 </style>
@@ -39,16 +40,17 @@
 
   <h2>Города</h2>
   <div id="cities"></div>
-  <input id="newCity" placeholder="Новый город">
+  <input id="newCity" placeholder="Название города">
+  <input id="newCityPhoto" type="file" accept="image/*">
   <button onclick="addCity()">Добавить город</button>
 
-  <h2>Магазины</h2>
+  <h2>Кафе и рестораны</h2>
   <select id="citySelect" onchange="loadShops()"></select>
   <div id="shops"></div>
-  <input id="shopName" placeholder="Название магазина">
+  <input id="shopName" placeholder="Название заведения">
   <input id="shopDesc" placeholder="Описание (необязательно)">
   <input id="shopPhone" placeholder="Телефон (необязательно)">
-  <button onclick="addShop()">Добавить магазин</button>
+  <button onclick="addShop()">Добавить заведение</button>
 
   <h2>Товары</h2>
   <select id="shopSelect" onchange="loadProducts()"></select>
@@ -82,7 +84,18 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c =>
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
-function say(text) { $('msg').textContent = text; }
+function say(text, ok) {
+  $('msg').style.color = ok ? '#2e7d32' : '#c0392b';
+  $('msg').textContent = text;
+}
+
+async function uploadFile(file) {
+  const safeName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
+  const path = `${Date.now()}-${safeName}`;
+  const { error } = await db.storage.from(BUCKET).upload(path, file);
+  if (error) throw error;
+  return db.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+}
 
 // ---------- Вход ----------
 async function init() {
@@ -119,22 +132,47 @@ async function loadCities() {
   $('citySelect').innerHTML = cities.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
   $('cities').innerHTML = cities.map(c => `
     <div class="row">
+      ${c.image_url ? `<img class="thumb" src="${esc(c.image_url)}" alt="">` : '<div class="thumb"></div>'}
       <span>${esc(c.name)}</span>
-      <button class="danger" onclick="delRow('cities', ${c.id}, 'Удалить город со всеми магазинами и товарами?')">Удалить</button>
+      <input type="file" accept="image/*" id="cityPhoto_${c.id}">
+      <button class="secondary" onclick="saveCityPhoto(${c.id})">Фото</button>
+      <button class="danger" onclick="delRow('cities', ${c.id}, 'Удалить город со всеми заведениями и товарами?')">Удалить</button>
     </div>`).join('') || '<p class="muted">Городов пока нет</p>';
   loadShops();
 }
 
 async function addCity() {
   const name = $('newCity').value.trim();
-  if (!name) return;
-  const { error } = await db.from('cities').insert({ name, sort_order: cities.length + 1 });
+  if (!name) return say('Введите название города');
+  let image_url = null;
+  const file = $('newCityPhoto').files[0];
+  if (file) {
+    try { image_url = await uploadFile(file); }
+    catch (e) { return say('Фото: ' + e.message); }
+  }
+  const { error } = await db.from('cities').insert({ name, image_url, sort_order: cities.length + 1 });
   if (error) return say(error.message);
   $('newCity').value = '';
+  $('newCityPhoto').value = '';
+  say('Город добавлен', true);
   loadCities();
 }
 
-// ---------- Магазины ----------
+async function saveCityPhoto(id) {
+  const file = $('cityPhoto_' + id).files[0];
+  if (!file) return say('Сначала выберите фото');
+  try {
+    const url = await uploadFile(file);
+    const { error } = await db.from('cities').update({ image_url: url }).eq('id', id);
+    if (error) throw error;
+    say('Фото города сохранено', true);
+    loadCities();
+  } catch (e) {
+    say('Фото: ' + e.message);
+  }
+}
+
+// ---------- Заведения ----------
 async function loadShops() {
   const cityId = $('citySelect').value;
   if (!cityId) {
@@ -154,15 +192,15 @@ function renderShops() {
   $('shops').innerHTML = shops.map(s => `
     <div class="row">
       <span><b>${esc(s.name)}</b>${s.phone ? ' · ' + esc(s.phone) : ''}</span>
-      <button class="danger" onclick="delRow('shops', ${s.id}, 'Удалить магазин со всеми товарами?')">Удалить</button>
-    </div>`).join('') || '<p class="muted">В этом городе магазинов нет</p>';
+      <button class="danger" onclick="delRow('shops', ${s.id}, 'Удалить заведение со всеми товарами?')">Удалить</button>
+    </div>`).join('') || '<p class="muted">В этом городе заведений нет</p>';
   $('shopSelect').innerHTML = shops.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
 }
 
 async function addShop() {
   const cityId = Number($('citySelect').value);
   const name = $('shopName').value.trim();
-  if (!cityId || !name) return say('Выберите город и введите название магазина');
+  if (!cityId || !name) return say('Выберите город и введите название заведения');
   const { error } = await db.from('shops').insert({
     city_id: cityId,
     name,
@@ -172,6 +210,7 @@ async function addShop() {
   });
   if (error) return say(error.message);
   ['shopName', 'shopDesc', 'shopPhone'].forEach(id => $(id).value = '');
+  say('Заведение добавлено', true);
   loadShops();
 }
 
@@ -198,7 +237,7 @@ function renderProducts() {
         ${p.in_stock ? 'в наличии' : '<span class="muted">нет в наличии</span>'}</span>
       <button class="secondary" onclick="editProduct(${p.id})">Изменить</button>
       <button class="danger" onclick="delRow('products', ${p.id}, 'Удалить товар?')">Удалить</button>
-    </div>`).join('') || '<p class="muted">В этом магазине товаров нет</p>';
+    </div>`).join('') || '<p class="muted">В этом заведении товаров нет</p>';
 }
 
 function editProduct(id) {
@@ -231,17 +270,14 @@ async function saveProduct() {
   const shopId = Number($('shopSelect').value);
   const name = $('pName').value.trim();
   const price = parseInt($('pPrice').value);
-  if (!shopId) return say('Сначала выберите магазин');
+  if (!shopId) return say('Сначала выберите заведение');
   if (!name || !price) return say('Укажите название и цену');
 
   let imageUrl = currentImageUrl;
   const file = $('pImage').files[0];
   if (file) {
-    const safeName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
-    const path = `${Date.now()}-${safeName}`;
-    const { error: upErr } = await db.storage.from(BUCKET).upload(path, file);
-    if (upErr) return say('Фото: ' + upErr.message);
-    imageUrl = db.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+    try { imageUrl = await uploadFile(file); }
+    catch (e) { return say('Фото: ' + e.message); }
   }
 
   const row = {
@@ -259,7 +295,7 @@ async function saveProduct() {
   const { error } = await request;
   if (error) return say(error.message);
 
-  say('Товар сохранён');
+  say('Товар сохранён', true);
   clearProductForm();
   loadProducts();
 }
@@ -269,6 +305,7 @@ async function delRow(table, id, question) {
   if (!confirm(question)) return;
   const { error } = await db.from(table).delete().eq('id', id);
   if (error) return say(error.message);
+  say('Удалено', true);
   loadCities();
 }
 
@@ -276,6 +313,3 @@ init();
 </script>
 </body>
 </html>
-
-
-
