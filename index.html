@@ -14,6 +14,10 @@
   .card { display: block; width: 100%; text-align: left; padding: 14px; margin: 8px 0;
           border: none; border-radius: 12px; font-size: 16px; color: inherit; box-sizing: border-box;
           background: var(--tg-theme-secondary-bg-color, #f1f1f1); }
+  .shop { display: flex; align-items: center; gap: 12px; }
+  .shop-img { width: 72px; height: 72px; border-radius: 10px; object-fit: cover; flex-shrink: 0;
+              background: #ddd; display: block; margin: 0; }
+  .shop-info { flex: 1; min-width: 0; }
   .city { position: relative; display: block; width: 100%; height: 150px; margin: 10px 0; padding: 0;
           border: none; border-radius: 14px; overflow: hidden; cursor: pointer;
           background: linear-gradient(135deg, #2481cc, #7fc4f5); }
@@ -67,6 +71,7 @@ let currentCityId = null;
 let shopsCache = [];
 let view = null;      // {shopId, shopName, products, query}
 let formData = null;  // данные формы, сохраняются при переходе назад
+let screen = 'cities';
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c =>
@@ -175,8 +180,6 @@ function cartBar() {
 }
 
 // ---------- Экраны ----------
-let screen = 'cities';
-
 async function showCities() {
   screen = 'cities';
   showLoading();
@@ -207,9 +210,14 @@ async function openCity(cityId) {
     '<h1>Кафе и рестораны</h1>';
   if (data.length === 0) html += '<p class="muted">В этом городе пока нет заведений.</p>';
   html += data.map(s => `
-    <button class="card" onclick="openShop(${s.id})">
-      <b>${esc(s.name)}</b>
-      ${s.description ? `<div class="muted">${esc(s.description)}</div>` : ''}
+    <button class="card shop" onclick="openShop(${s.id})">
+      ${s.image_url
+        ? `<img class="shop-img" src="${esc(s.image_url)}" alt="">`
+        : '<div class="shop-img"></div>'}
+      <div class="shop-info">
+        <b>${esc(s.name)}</b>
+        ${s.description ? `<div class="muted">${esc(s.description)}</div>` : ''}
+      </div>
     </button>`).join('');
   app.innerHTML = html + cartBar();
 }
