@@ -39,6 +39,8 @@
 <script>
 const SUPABASE_URL = 'https://uwafdyrpyrcnjliwystd.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_jIxy3j0mu8dLYCpa4T1hyg_npMmhEwD';
+// Контакт для вопросов по заказу (показывается клиенту после оформления)
+const SUPPORT_NICK = 'Viktor_Kitay_legko';
 
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const tg = window.Telegram?.WebApp;
@@ -58,15 +60,6 @@ function esc(s) {
 function showError(error) {
   app.innerHTML = '<p>Ошибка загрузки: ' + esc(error.message) + '</p>';
 }
-
-// ---------- Диагностика: что видит мини-приложение ----------
-const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
-const dbg = document.createElement('div');
-dbg.style = 'font-size:12px;color:#888;padding:4px 0 8px';
-dbg.textContent = 'Telegram: ' + (window.Telegram?.WebApp ? 'есть' : 'нет')
-  + ', платформа: ' + (tg?.platform || '-')
-  + ', пользователь: ' + (tgUser ? tgUser.id : 'нет');
-document.body.prepend(dbg);
 
 // ---------- Корзина: {shops: {shopId: {shopId, shopName, items: {productId: {...}}}}} ----------
 function loadCart() {
@@ -230,6 +223,7 @@ function openForm() {
     <div class="form">
       <label>Имя<input id="f_name" type="text"></label>
       <label>Телефон<input id="f_phone" type="tel" placeholder="+7"></label>
+      <label>Ваш ник в Telegram (необязательно)<input id="f_nick" type="text" placeholder="@ivan"></label>
       <label>Доставка
         <select id="f_type" onchange="updateAddrLabel()">
           <option value="hotel">В отель</option>
@@ -254,6 +248,12 @@ function updateAddrLabel() {
 async function submitOrder() {
   const msg = document.getElementById('f_msg');
   const btn = document.getElementById('f_submit');
+  const nickRaw = document.getElementById('f_nick').value.trim().replace(/^@/, '');
+  if (nickRaw && !/^[A-Za-z0-9_]{5,32}$/.test(nickRaw)) {
+    msg.textContent = 'Ник: только латинские буквы, цифры и _, от 5 символов.';
+    return;
+  }
+
   const body = {
     orders: Object.values(cart.shops).map(s => ({
       shop_id: s.shopId,
@@ -263,8 +263,7 @@ async function submitOrder() {
     phone: document.getElementById('f_phone').value.trim(),
     delivery_type: document.getElementById('f_type').value,
     address: document.getElementById('f_addr').value.trim(),
-    tg_user_id: window.Telegram?.WebApp?.initDataUnsafe?.user?.id ?? null,
-    tg_username: window.Telegram?.WebApp?.initDataUnsafe?.user?.username ?? null,
+    tg_username: nickRaw || null,
   };
   if (!body.customer_name || !body.phone || !body.address) {
     msg.textContent = 'Заполните все поля.';
@@ -285,6 +284,7 @@ async function submitOrder() {
   emptyCart();
   app.innerHTML = `<h1>Спасибо!</h1>${list}
     <p><b>Итого: ${data.total} ₽.</b> Мы свяжемся с вами по телефону.</p>
+    <p>По вопросам по заказу пишите: <a href="https://t.me/${SUPPORT_NICK}">@${SUPPORT_NICK}</a></p>
     <button class="add" onclick="showCities()">В каталог</button>`;
 }
 
