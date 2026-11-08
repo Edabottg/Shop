@@ -245,7 +245,7 @@ function updateAddrLabel() {
 async function submitOrder() {
   const msg = document.getElementById('f_msg');
   const btn = document.getElementById('f_submit');
-  const body = {
+    const body = {
     orders: Object.values(cart.shops).map(s => ({
       shop_id: s.shopId,
       items: Object.values(s.items).map(i => ({ id: i.id, qty: i.qty })),
@@ -253,10 +253,9 @@ async function submitOrder() {
     customer_name: document.getElementById('f_name').value.trim(),
     phone: document.getElementById('f_phone').value.trim(),
     delivery_type: document.getElementById('f_type').value,
+    address: document.getElementById('f_addr').value.trim(),
     tg_user_id: window.Telegram?.WebApp?.initDataUnsafe?.user?.id ?? null,
     tg_username: window.Telegram?.WebApp?.initDataUnsafe?.user?.username ?? null,
-    
-    address: document.getElementById('f_addr').value.trim(),
   };
   if (!body.customer_name || !body.phone || !body.address) {
     msg.textContent = 'Заполните все поля.';
