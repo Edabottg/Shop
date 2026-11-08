@@ -253,6 +253,9 @@ async function submitOrder() {
     customer_name: document.getElementById('f_name').value.trim(),
     phone: document.getElementById('f_phone').value.trim(),
     delivery_type: document.getElementById('f_type').value,
+    tg_user_id: window.Telegram?.WebApp?.initDataUnsafe?.user?.id ?? null,
+    tg_username: window.Telegram?.WebApp?.initDataUnsafe?.user?.username ?? null,
+    
     address: document.getElementById('f_addr').value.trim(),
   };
   if (!body.customer_name || !body.phone || !body.address) {
