@@ -3,305 +3,313 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Магазин</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<title>Админка</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px 16px 90px;
-         background: var(--tg-theme-bg-color, #fff); color: var(--tg-theme-text-color, #000); }
-  h1 { font-size: 20px; margin: 8px 0 12px; }
-  .shop-title { font-size: 17px; margin: 20px 0 4px; color: var(--tg-theme-hint-color, #888); }
-  .card { display: block; width: 100%; text-align: left; padding: 14px; margin: 8px 0;
-          border: none; border-radius: 12px; font-size: 16px; color: inherit; box-sizing: border-box;
-          background: var(--tg-theme-secondary-bg-color, #f1f1f1); }
-  .back { background: none; border: none; color: var(--tg-theme-link-color, #2481cc);
-          font-size: 16px; padding: 0; margin-bottom: 8px; }
-  .price { font-weight: bold; margin-top: 4px; }
-  .muted { color: #888; font-size: 14px; }
-  img { max-width: 100%; border-radius: 10px; margin-top: 6px; }
-  .add { width: 100%; padding: 14px; margin-top: 8px; border: none; border-radius: 12px; font-size: 16px;
-         background: var(--tg-theme-button-color, #2481cc); color: var(--tg-theme-button-text-color, #fff); }
-  .qty { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 8px; }
-  .qty button { width: 44px; height: 44px; border: none; border-radius: 10px; font-size: 22px;
-                background: var(--tg-theme-button-color, #2481cc); color: var(--tg-theme-button-text-color, #fff); }
-  .qty span { font-size: 18px; min-width: 24px; text-align: center; }
-  .cartbar { position: fixed; left: 12px; right: 12px; bottom: 12px; padding: 14px; border-radius: 12px;
-             text-align: center; font-weight: bold; cursor: pointer;
-             background: var(--tg-theme-button-color, #2481cc); color: var(--tg-theme-button-text-color, #fff); }
-  .form label { display: block; margin: 12px 0; font-size: 14px; }
-  .form input, .form select, .form textarea { width: 100%; box-sizing: border-box; padding: 10px;
-    margin-top: 4px; font-size: 16px; border-radius: 8px; border: 1px solid #ccc; }
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; max-width: 720px; }
+  h2 { margin: 28px 0 8px; font-size: 18px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+  input, select, textarea { width: 100%; box-sizing: border-box; padding: 8px; margin: 4px 0 10px;
+    font-size: 15px; border: 1px solid #bbb; border-radius: 6px; }
+  input[type=checkbox] { width: auto; }
+  button { padding: 8px 14px; margin: 0 6px 8px 0; border: none; border-radius: 6px;
+    background: #2481cc; color: #fff; font-size: 14px; cursor: pointer; }
+  button.secondary { background: #888; }
+  button.danger { background: #c0392b; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #eee; }
+  .row span { flex: 1; }
+  .row input[type=file] { width: 130px; margin: 0; font-size: 12px; }
+  .muted { color: #888; font-size: 13px; }
+  .thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; flex-shrink: 0; background: #eee; }
+  .err { color: #c0392b; min-height: 20px; }
+  .hidden { display: none; }
 </style>
 </head>
 <body>
-<div id="app">Загрузка...</div>
+
+<div id="login" class="hidden">
+  <h2>Вход в админку</h2>
+  <input id="email" type="email" placeholder="Email">
+  <input id="password" type="password" placeholder="Пароль">
+  <button onclick="login()">Войти</button>
+  <p id="loginMsg" class="err"></p>
+</div>
+
+<div id="panel" class="hidden">
+  <div class="row"><span><b>Админка</b></span><button class="secondary" onclick="logout()">Выйти</button></div>
+  <p id="msg" class="err"></p>
+
+  <h2>Города</h2>
+  <div id="cities"></div>
+  <input id="newCity" placeholder="Название города">
+  <input id="newCityPhoto" type="file" accept="image/*">
+  <button onclick="addCity()">Добавить город</button>
+
+  <h2>Кафе и рестораны</h2>
+  <select id="citySelect" onchange="loadShops()"></select>
+  <div id="shops"></div>
+  <input id="shopName" placeholder="Название заведения">
+  <input id="shopDesc" placeholder="Описание (необязательно)">
+  <input id="shopPhone" placeholder="Телефон (необязательно)">
+  <button onclick="addShop()">Добавить заведение</button>
+
+  <h2>Товары</h2>
+  <select id="shopSelect" onchange="loadProducts()"></select>
+  <div id="products"></div>
+
+  <h2 id="formTitle">Новый товар</h2>
+  <input id="pName" placeholder="Название">
+  <textarea id="pDesc" rows="2" placeholder="Описание (необязательно)"></textarea>
+  <input id="pPrice" type="number" placeholder="Цена, ₽">
+  <input id="pImage" type="file" accept="image/*">
+  <p class="muted" id="pImageNote"></p>
+  <label><input type="checkbox" id="pStock" checked> В наличии</label>
+  <div style="margin-top: 10px">
+    <button onclick="saveProduct()">Сохранить товар</button>
+    <button class="secondary" onclick="clearProductForm()">Очистить форму</button>
+  </div>
+</div>
 
 <script>
 const SUPABASE_URL = 'https://uwafdyrpyrcnjliwystd.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_jIxy3j0mu8dLYCpa4T1hyg_npMmhEwD';
-const SUPPORT_NICK = 'Viktor_Kitay_legko';
+const BUCKET = 'product-images';
 
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const tg = window.Telegram?.WebApp;
-tg?.ready();
-tg?.expand();
+const $ = id => document.getElementById(id);
 
-const app = document.getElementById('app');
-let currentCityId = null;
-let view = null;
-let screen = 'cities';
+let cities = [], shops = [], products = [];
+let editId = null, currentImageUrl = null;
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c =>
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
-
-function showError(error) {
-  app.innerHTML = '<p>Ошибка загрузки: ' + esc(error.message) + '</p>';
+function say(text, ok) {
+  $('msg').style.color = ok ? '#2e7d32' : '#c0392b';
+  $('msg').textContent = text;
 }
 
-// ---------- Данные пользователя из Telegram ----------
-function tgUser() {
-  return window.Telegram?.WebApp?.initDataUnsafe?.user || null;
-}
-function tgName() {
-  const u = tgUser();
-  return u ? [u.first_name, u.last_name].filter(Boolean).join(' ') : '';
-}
-
-// ---------- Корзина: {shops: {shopId: {shopId, shopName, items: {productId: {...}}}}} ----------
-function loadCart() {
-  try {
-    return JSON.parse(localStorage.getItem('cart_v2')) || { shops: {} };
-  } catch (e) {
-    return { shops: {} };
-  }
-}
-let cart = loadCart();
-
-function saveCart() {
-  try { localStorage.setItem('cart_v2', JSON.stringify(cart)); } catch (e) {}
-}
-function emptyCart() {
-  cart = { shops: {} };
-  saveCart();
-}
-function cartCount() {
-  return Object.values(cart.shops).reduce((s, sh) =>
-    s + Object.values(sh.items).reduce((t, i) => t + i.qty, 0), 0);
-}
-function cartTotal() {
-  return Object.values(cart.shops).reduce((s, sh) =>
-    s + Object.values(sh.items).reduce((t, i) => t + i.qty * i.price_rub, 0), 0);
-}
-function shopCount() {
-  return Object.keys(cart.shops).length;
-}
-function qtyIn(shopId, productId) {
-  return cart.shops[shopId]?.items[productId]?.qty || 0;
+async function uploadFile(file) {
+  const safeName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
+  const path = `${Date.now()}-${safeName}`;
+  const { error } = await db.storage.from(BUCKET).upload(path, file);
+  if (error) throw error;
+  return db.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
 }
 
-function addToCart(productId) {
-  const sid = view.shopId;
-  const p = view.products.find(x => x.id === productId);
-  if (!cart.shops[sid]) cart.shops[sid] = { shopId: sid, shopName: view.shopName, items: {} };
-  const shop = cart.shops[sid];
-  const it = shop.items[productId] || { id: p.id, name: p.name, price_rub: p.price_rub, qty: 0 };
-  it.qty += 1;
-  shop.items[productId] = it;
-  saveCart();
-  renderProducts();
+// ---------- Вход ----------
+async function init() {
+  const { data } = await db.auth.getSession();
+  if (data.session) showPanel();
+  else $('login').classList.remove('hidden');
 }
 
-function changeQty(shopId, productId, delta) {
-  const shop = cart.shops[shopId];
-  if (!shop || !shop.items[productId]) return;
-  const it = shop.items[productId];
-  it.qty += delta;
-  if (it.qty <= 0) delete shop.items[productId];
-  if (Object.keys(shop.items).length === 0) delete cart.shops[shopId];
-  saveCart();
-  if (screen === 'cart') {
-    openCart();
-  } else {
-    renderProducts();
-  }
+async function login() {
+  const { error } = await db.auth.signInWithPassword({
+    email: $('email').value.trim(),
+    password: $('password').value,
+  });
+  if (error) { $('loginMsg').textContent = 'Неверный email или пароль'; return; }
+  showPanel();
 }
 
-function cartBar() {
-  if (cartCount() === 0) return '';
-  return `<div class="cartbar" onclick="openCart()">
-    Корзина: ${cartCount()} шт. · ${cartTotal()} ₽ · магазинов: ${shopCount()} →</div>`;
+async function logout() {
+  await db.auth.signOut();
+  location.reload();
 }
 
-// ---------- Экраны ----------
-async function showCities() {
-  screen = 'cities';
+function showPanel() {
+  $('login').classList.add('hidden');
+  $('panel').classList.remove('hidden');
+  loadCities();
+}
+
+// ---------- Города ----------
+async function loadCities() {
   const { data, error } = await db.from('cities').select('*').order('sort_order');
-  if (error) return showError(error);
-  let html = '<h1>Выберите город</h1>' +
-    data.map(c => `<button class="card" onclick="openCity(${c.id})">${esc(c.name)}</button>`).join('');
-  if (cartCount() > 0) {
-    html += `<button class="card" onclick="openCart()"><b>Корзина</b><br>
-      ${cartCount()} шт. · ${cartTotal()} ₽ · магазинов: ${shopCount()}</button>`;
-  }
-  app.innerHTML = html;
+  if (error) return say(error.message);
+  cities = data;
+  $('citySelect').innerHTML = cities.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  $('cities').innerHTML = cities.map(c => `
+    <div class="row">
+      ${c.image_url ? `<img class="thumb" src="${esc(c.image_url)}" alt="">` : '<div class="thumb"></div>'}
+      <span>${esc(c.name)}</span>
+      <input type="file" accept="image/*" id="cityPhoto_${c.id}">
+      <button class="secondary" onclick="saveCityPhoto(${c.id})">Фото</button>
+      <button class="danger" onclick="delRow('cities', ${c.id}, 'Удалить город со всеми заведениями и товарами?')">Удалить</button>
+    </div>`).join('') || '<p class="muted">Городов пока нет</p>';
+  loadShops();
 }
 
-async function openCity(cityId) {
-  currentCityId = cityId;
-  screen = 'shops';
+async function addCity() {
+  const name = $('newCity').value.trim();
+  if (!name) return say('Введите название города');
+  let image_url = null;
+  const file = $('newCityPhoto').files[0];
+  if (file) {
+    try { image_url = await uploadFile(file); }
+    catch (e) { return say('Фото: ' + e.message); }
+  }
+  const { error } = await db.from('cities').insert({ name, image_url, sort_order: cities.length + 1 });
+  if (error) return say(error.message);
+  $('newCity').value = '';
+  $('newCityPhoto').value = '';
+  say('Город добавлен', true);
+  loadCities();
+}
+
+async function saveCityPhoto(id) {
+  const file = $('cityPhoto_' + id).files[0];
+  if (!file) return say('Сначала выберите фото');
+  try {
+    const url = await uploadFile(file);
+    const { error } = await db.from('cities').update({ image_url: url }).eq('id', id);
+    if (error) throw error;
+    say('Фото города сохранено', true);
+    loadCities();
+  } catch (e) {
+    say('Фото: ' + e.message);
+  }
+}
+
+// ---------- Заведения ----------
+async function loadShops() {
+  const cityId = $('citySelect').value;
+  if (!cityId) {
+    shops = [];
+    renderShops();
+    return loadProducts();
+  }
   const { data, error } = await db.from('shops').select('*')
     .eq('city_id', cityId).order('sort_order');
-  if (error) return showError(error);
-  let html = '<button class="back" onclick="showCities()">← Города</button><h1>Магазины</h1>';
-  if (data.length === 0) html += '<p class="muted">В этом городе пока нет магазинов.</p>';
-  html += data.map(s =>
-    `<button class="card" onclick="openShop(${s.id}, ${JSON.stringify(s.name).replace(/"/g, '&quot;')})">
-       <b>${esc(s.name)}</b>
-       ${s.description ? `<div class="muted">${esc(s.description)}</div>` : ''}
-     </button>`).join('');
-  app.innerHTML = html;
+  if (error) return say(error.message);
+  shops = data;
+  renderShops();
+  loadProducts();
 }
 
-async function openShop(shopId, shopName) {
+function renderShops() {
+  $('shops').innerHTML = shops.map(s => `
+    <div class="row">
+      <span><b>${esc(s.name)}</b>${s.phone ? ' · ' + esc(s.phone) : ''}</span>
+      <button class="danger" onclick="delRow('shops', ${s.id}, 'Удалить заведение со всеми товарами?')">Удалить</button>
+    </div>`).join('') || '<p class="muted">В этом городе заведений нет</p>';
+  $('shopSelect').innerHTML = shops.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+}
+
+async function addShop() {
+  const cityId = Number($('citySelect').value);
+  const name = $('shopName').value.trim();
+  if (!cityId || !name) return say('Выберите город и введите название заведения');
+  const { error } = await db.from('shops').insert({
+    city_id: cityId,
+    name,
+    description: $('shopDesc').value.trim() || null,
+    phone: $('shopPhone').value.trim() || null,
+    sort_order: shops.length + 1,
+  });
+  if (error) return say(error.message);
+  ['shopName', 'shopDesc', 'shopPhone'].forEach(id => $(id).value = '');
+  say('Заведение добавлено', true);
+  loadShops();
+}
+
+// ---------- Товары ----------
+async function loadProducts() {
+  const shopId = $('shopSelect').value;
+  if (!shopId) {
+    products = [];
+    renderProducts();
+    return;
+  }
   const { data, error } = await db.from('products').select('*')
-    .eq('shop_id', shopId).eq('in_stock', true).order('sort_order');
-  if (error) return showError(error);
-  view = { shopId, shopName, products: data };
+    .eq('shop_id', shopId).order('sort_order');
+  if (error) return say(error.message);
+  products = data;
   renderProducts();
 }
 
 function renderProducts() {
-  screen = 'products';
-  let html = `<button class="back" onclick="openCity(${currentCityId})">← Магазины</button>` +
-    `<h1>${esc(view.shopName)}</h1>`;
-  if (view.products.length === 0) html += '<p class="muted">В этом магазине пока нет товаров.</p>';
-  html += view.products.map(p => {
-    const qty = qtyIn(view.shopId, p.id);
-    return `<div class="card">
-      <b>${esc(p.name)}</b>
-      ${p.description ? `<div class="muted">${esc(p.description)}</div>` : ''}
-      ${p.image_url ? `<img src="${esc(p.image_url)}" alt="">` : ''}
-      <div class="price">${p.price_rub} ₽</div>
-      ${qty
-        ? `<div class="qty">
-             <button onclick="changeQty(${view.shopId}, ${p.id}, -1)">−</button>
-             <span>${qty}</span>
-             <button onclick="changeQty(${view.shopId}, ${p.id}, 1)">+</button>
-           </div>`
-        : `<button class="add" onclick="addToCart(${p.id})">В корзину</button>`}
-    </div>`;
-  }).join('');
-  html += cartBar();
-  app.innerHTML = html;
+  $('products').innerHTML = products.map(p => `
+    <div class="row">
+      ${p.image_url ? `<img class="thumb" src="${esc(p.image_url)}" alt="">` : '<div class="thumb"></div>'}
+      <span><b>${esc(p.name)}</b><br>${p.price_rub} ₽ ·
+        ${p.in_stock ? 'в наличии' : '<span class="muted">нет в наличии</span>'}</span>
+      <button class="secondary" onclick="editProduct(${p.id})">Изменить</button>
+      <button class="danger" onclick="delRow('products', ${p.id}, 'Удалить товар?')">Удалить</button>
+    </div>`).join('') || '<p class="muted">В этом заведении товаров нет</p>';
 }
 
-function openCart() {
-  if (cartCount() === 0) return showCities();
-  screen = 'cart';
-  let html = `<button class="back" onclick="${view ? 'renderProducts()' : 'showCities()'}">← Назад</button>` +
-    '<h1>Корзина</h1>';
-  for (const shop of Object.values(cart.shops)) {
-    const items = Object.values(shop.items);
-    const subtotal = items.reduce((s, i) => s + i.qty * i.price_rub, 0);
-    html += `<div class="shop-title">${esc(shop.shopName)}</div>`;
-    html += items.map(i => `<div class="card">
-        <b>${esc(i.name)}</b>
-        <div class="price">${i.price_rub} ₽ × ${i.qty} = ${i.price_rub * i.qty} ₽</div>
-        <div class="qty">
-          <button onclick="changeQty(${shop.shopId}, ${i.id}, -1)">−</button>
-          <span>${i.qty}</span>
-          <button onclick="changeQty(${shop.shopId}, ${i.id}, 1)">+</button>
-        </div>
-      </div>`).join('');
-    html += `<p class="muted">Заказ из этого магазина: ${subtotal} ₽</p>`;
-  }
-  html += `<p class="price">Итого: ${cartTotal()} ₽</p>
-    <p class="muted">Каждый магазин оформляется отдельным заказом, и вам придёт отдельное сообщение.</p>
-    <button class="add" onclick="openForm()">Оформить заказ</button>`;
-  app.innerHTML = html;
+function editProduct(id) {
+  const p = products.find(x => x.id === id);
+  editId = p.id;
+  currentImageUrl = p.image_url;
+  $('pName').value = p.name;
+  $('pDesc').value = p.description || '';
+  $('pPrice').value = p.price_rub;
+  $('pStock').checked = p.in_stock;
+  $('pImage').value = '';
+  $('pImageNote').textContent = p.image_url
+    ? 'Фото уже есть. Выберите новое, чтобы заменить.'
+    : 'Фото нет.';
+  $('formTitle').textContent = 'Редактирование товара';
+  $('formTitle').scrollIntoView();
 }
 
-function openForm() {
-  screen = 'form';
-  const u = tgUser();
-  const nickValue = u?.username ? '@' + u.username : '';
-  app.innerHTML = `
-    <button class="back" onclick="openCart()">← Корзина</button>
-    <h1>Оформление заказа</h1>
-    <div class="form">
-      <label>Имя<input id="f_name" type="text" value="${esc(tgName())}"></label>
-      <label>Телефон<input id="f_phone" type="tel" placeholder="+7"></label>
-      <label>Ваш ник в Telegram (необязательно)<input id="f_nick" type="text" placeholder="@ivan" value="${esc(nickValue)}"></label>
-      <label>Доставка
-        <select id="f_type" onchange="updateAddrLabel()">
-          <option value="hotel">В отель</option>
-          <option value="apartment">В квартиру</option>
-        </select>
-      </label>
-      <label id="f_addr_label">Название отеля и номер комнаты
-        <textarea id="f_addr" rows="3"></textarea>
-      </label>
-      <button class="add" id="f_submit" onclick="submitOrder()">Отправить заказ</button>
-      <p id="f_msg" class="muted"></p>
-    </div>`;
+function clearProductForm() {
+  editId = null;
+  currentImageUrl = null;
+  ['pName', 'pDesc', 'pPrice'].forEach(id => $(id).value = '');
+  $('pImage').value = '';
+  $('pStock').checked = true;
+  $('pImageNote').textContent = '';
+  $('formTitle').textContent = 'Новый товар';
 }
 
-function updateAddrLabel() {
-  const isHotel = document.getElementById('f_type').value === 'hotel';
-  document.getElementById('f_addr_label').firstChild.textContent = isHotel
-    ? 'Название отеля и номер комнаты'
-    : 'Адрес: улица, дом, подъезд, этаж, квартира';
-}
+async function saveProduct() {
+  const shopId = Number($('shopSelect').value);
+  const name = $('pName').value.trim();
+  const price = parseInt($('pPrice').value);
+  if (!shopId) return say('Сначала выберите заведение');
+  if (!name || !price) return say('Укажите название и цену');
 
-async function submitOrder() {
-  const msg = document.getElementById('f_msg');
-  const btn = document.getElementById('f_submit');
-  const nickRaw = document.getElementById('f_nick').value.trim().replace(/^@/, '');
-  if (nickRaw && !/^[A-Za-z0-9_]{5,32}$/.test(nickRaw)) {
-    msg.textContent = 'Ник: только латинские буквы, цифры и _, от 5 символов.';
-    return;
+  let imageUrl = currentImageUrl;
+  const file = $('pImage').files[0];
+  if (file) {
+    try { imageUrl = await uploadFile(file); }
+    catch (e) { return say('Фото: ' + e.message); }
   }
 
-  const u = tgUser();
-  const body = {
-    orders: Object.values(cart.shops).map(s => ({
-      shop_id: s.shopId,
-      items: Object.values(s.items).map(i => ({ id: i.id, qty: i.qty })),
-    })),
-    customer_name: document.getElementById('f_name').value.trim(),
-    phone: document.getElementById('f_phone').value.trim(),
-    delivery_type: document.getElementById('f_type').value,
-    address: document.getElementById('f_addr').value.trim(),
-    tg_user_id: u?.id ?? null,
-    tg_name: u ? [u.first_name, u.last_name].filter(Boolean).join(' ') : null,
-    tg_username: nickRaw || u?.username || null,
+  const row = {
+    shop_id: shopId,
+    name,
+    description: $('pDesc').value.trim() || null,
+    price_rub: price,
+    image_url: imageUrl,
+    in_stock: $('pStock').checked,
   };
-  if (!body.customer_name || !body.phone || !body.address) {
-    msg.textContent = 'Заполните все поля.';
-    return;
-  }
-  btn.disabled = true;
-  msg.textContent = 'Отправляем...';
 
-  const { data, error } = await db.functions.invoke('send-order', { body });
-  if (error || !data?.ok) {
-    btn.disabled = false;
-    msg.textContent = 'Не удалось отправить: ' + (data?.error || error?.message || 'ошибка');
-    return;
-  }
+  const request = editId
+    ? db.from('products').update(row).eq('id', editId)
+    : db.from('products').insert(row);
+  const { error } = await request;
+  if (error) return say(error.message);
 
-  const list = data.orders.map(o =>
-    `<p>Заказ №${o.order_id} · ${esc(o.shop_name)} · ${o.total} ₽</p>`).join('');
-  emptyCart();
-  app.innerHTML = `<h1>Спасибо!</h1>${list}
-    <p><b>Итого: ${data.total} ₽.</b> Мы свяжемся с вами по телефону.</p>
-    <p>По вопросам по заказу пишите: <a href="https://t.me/${SUPPORT_NICK}">@${SUPPORT_NICK}</a></p>
-    <button class="add" onclick="showCities()">В каталог</button>`;
+  say('Товар сохранён', true);
+  clearProductForm();
+  loadProducts();
 }
 
-showCities();
+// ---------- Удаление ----------
+async function delRow(table, id, question) {
+  if (!confirm(question)) return;
+  const { error } = await db.from(table).delete().eq('id', id);
+  if (error) return say(error.message);
+  say('Удалено', true);
+  loadCities();
+}
+
+init();
 </script>
 </body>
 </html>
