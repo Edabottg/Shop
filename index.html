@@ -39,7 +39,6 @@
 <script>
 const SUPABASE_URL = 'https://uwafdyrpyrcnjliwystd.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_jIxy3j0mu8dLYCpa4T1hyg_npMmhEwD';
-// Контакт для вопросов по заказу (показывается клиенту после оформления)
 const SUPPORT_NICK = 'Viktor_Kitay_legko';
 
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -59,6 +58,15 @@ function esc(s) {
 
 function showError(error) {
   app.innerHTML = '<p>Ошибка загрузки: ' + esc(error.message) + '</p>';
+}
+
+// ---------- Данные пользователя из Telegram ----------
+function tgUser() {
+  return window.Telegram?.WebApp?.initDataUnsafe?.user || null;
+}
+function tgName() {
+  const u = tgUser();
+  return u ? [u.first_name, u.last_name].filter(Boolean).join(' ') : '';
 }
 
 // ---------- Корзина: {shops: {shopId: {shopId, shopName, items: {productId: {...}}}}} ----------
@@ -217,13 +225,15 @@ function openCart() {
 
 function openForm() {
   screen = 'form';
+  const u = tgUser();
+  const nickValue = u?.username ? '@' + u.username : '';
   app.innerHTML = `
     <button class="back" onclick="openCart()">← Корзина</button>
     <h1>Оформление заказа</h1>
     <div class="form">
-      <label>Имя<input id="f_name" type="text"></label>
+      <label>Имя<input id="f_name" type="text" value="${esc(tgName())}"></label>
       <label>Телефон<input id="f_phone" type="tel" placeholder="+7"></label>
-      <label>Ваш ник в Telegram (необязательно)<input id="f_nick" type="text" placeholder="@ivan"></label>
+      <label>Ваш ник в Telegram (необязательно)<input id="f_nick" type="text" placeholder="@ivan" value="${esc(nickValue)}"></label>
       <label>Доставка
         <select id="f_type" onchange="updateAddrLabel()">
           <option value="hotel">В отель</option>
@@ -254,6 +264,7 @@ async function submitOrder() {
     return;
   }
 
+  const u = tgUser();
   const body = {
     orders: Object.values(cart.shops).map(s => ({
       shop_id: s.shopId,
@@ -263,7 +274,9 @@ async function submitOrder() {
     phone: document.getElementById('f_phone').value.trim(),
     delivery_type: document.getElementById('f_type').value,
     address: document.getElementById('f_addr').value.trim(),
-    tg_username: nickRaw || null,
+    tg_user_id: u?.id ?? null,
+    tg_name: u ? [u.first_name, u.last_name].filter(Boolean).join(' ') : null,
+    tg_username: nickRaw || u?.username || null,
   };
   if (!body.customer_name || !body.phone || !body.address) {
     msg.textContent = 'Заполните все поля.';
