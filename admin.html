@@ -50,6 +50,7 @@
   <input id="shopName" placeholder="Название заведения">
   <input id="shopDesc" placeholder="Описание (необязательно)">
   <input id="shopPhone" placeholder="Телефон (необязательно)">
+  <input id="newShopPhoto" type="file" accept="image/*">
   <button onclick="addShop()">Добавить заведение</button>
 
   <h2>Товары</h2>
@@ -191,7 +192,10 @@ async function loadShops() {
 function renderShops() {
   $('shops').innerHTML = shops.map(s => `
     <div class="row">
+      ${s.image_url ? `<img class="thumb" src="${esc(s.image_url)}" alt="">` : '<div class="thumb"></div>'}
       <span><b>${esc(s.name)}</b>${s.phone ? ' · ' + esc(s.phone) : ''}</span>
+      <input type="file" accept="image/*" id="shopPhoto_${s.id}">
+      <button class="secondary" onclick="saveShopPhoto(${s.id})">Фото</button>
       <button class="danger" onclick="delRow('shops', ${s.id}, 'Удалить заведение со всеми товарами?')">Удалить</button>
     </div>`).join('') || '<p class="muted">В этом городе заведений нет</p>';
   $('shopSelect').innerHTML = shops.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
@@ -201,17 +205,39 @@ async function addShop() {
   const cityId = Number($('citySelect').value);
   const name = $('shopName').value.trim();
   if (!cityId || !name) return say('Выберите город и введите название заведения');
+  let image_url = null;
+  const file = $('newShopPhoto').files[0];
+  if (file) {
+    try { image_url = await uploadFile(file); }
+    catch (e) { return say('Фото: ' + e.message); }
+  }
   const { error } = await db.from('shops').insert({
     city_id: cityId,
     name,
     description: $('shopDesc').value.trim() || null,
     phone: $('shopPhone').value.trim() || null,
+    image_url,
     sort_order: shops.length + 1,
   });
   if (error) return say(error.message);
   ['shopName', 'shopDesc', 'shopPhone'].forEach(id => $(id).value = '');
+  $('newShopPhoto').value = '';
   say('Заведение добавлено', true);
   loadShops();
+}
+
+async function saveShopPhoto(id) {
+  const file = $('shopPhoto_' + id).files[0];
+  if (!file) return say('Сначала выберите фото');
+  try {
+    const url = await uploadFile(file);
+    const { error } = await db.from('shops').update({ image_url: url }).eq('id', id);
+    if (error) throw error;
+    say('Фото заведения сохранено', true);
+    loadShops();
+  } catch (e) {
+    say('Фото: ' + e.message);
+  }
 }
 
 // ---------- Товары ----------
