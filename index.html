@@ -34,6 +34,8 @@
   .bbtn span { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 8px; color: #fff;
                font-size: 13px; font-weight: bold; text-align: left;
                background: linear-gradient(transparent, rgba(0,0,0,.6)); }
+  .support { display: block; width: 100%; margin-top: 12px; padding: 10px; border: none; background: none;
+             color: var(--tg-theme-link-color, #2481cc); font-size: 16px; text-align: center; cursor: pointer; }
   .back { background: none; border: none; color: var(--tg-theme-link-color, #2481cc);
           font-size: 16px; padding: 0; margin-bottom: 8px; }
   .price { font-weight: bold; margin-top: 4px; }
@@ -82,6 +84,7 @@
 const SUPABASE_URL = 'https://uwafdyrpyrcnjliwystd.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_jIxy3j0mu8dLYCpa4T1hyg_npMmhEwD';
 const SUPPORT_NICK = 'Viktor_Kitay_legko';
+const DEFAULT_FEE = 450;
 
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const tg = window.Telegram?.WebApp;
@@ -91,10 +94,10 @@ tg?.expand();
 const app = document.getElementById('app');
 let currentCityId = null;
 let shopsCache = [];
-let view = null;      // {shopId, shopName, products, query, parentId, path}
+let view = null;      // {shopId, shopName, fee, products, query, parentId, path}
 let formData = null;
 let screen = 'cities';
-let bottomList = [];  // кнопки внизу списка городов
+let bottomList = [];
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c =>
@@ -132,12 +135,19 @@ function cleanNick(raw) {
 }
 
 // ---------- Внешние ссылки ----------
-function openBottom(i) {
-  const url = bottomList[i]?.link_url;
+function openExternal(url) {
   if (!url) return;
   if (tg?.openTelegramLink && /^https:\/\/t\.me\//i.test(url)) tg.openTelegramLink(url);
   else if (tg?.openLink) tg.openLink(url);
   else window.open(url, '_blank');
+}
+
+function openBottom(i) {
+  openExternal(bottomList[i]?.link_url);
+}
+
+function openSupport() {
+  openExternal(`https://t.me/${SUPPORT_NICK}`);
 }
 
 function bottomButtonsHtml() {
@@ -146,10 +156,11 @@ function bottomButtonsHtml() {
     <button class="bbtn" onclick="openBottom(${i})">
       ${b.image_url ? `<img src="${esc(b.image_url)}" alt="">` : ''}
       ${b.title ? `<span>${esc(b.title)}</span>` : ''}
-    </button>`).join('') + '</div>';
+    </button>`).join('') + '</div>' +
+    `<button class="support" onclick="openSupport()">Техническая поддержка</button>`;
 }
 
-// ---------- Корзина: {shops: {shopId: {shopId, shopName, items: {productId: {...}}}}} ----------
+// ---------- Корзина: {shops: {shopId: {shopId, shopName, fee, items: {productId: {...}}}}} ----------
 function loadCart() {
   try {
     return JSON.parse(localStorage.getItem('cart_v2')) || { shops: {} };
@@ -170,9 +181,21 @@ function cartCount() {
   return Object.values(cart.shops).reduce((s, sh) =>
     s + Object.values(sh.items).reduce((t, i) => t + i.qty, 0), 0);
 }
+function shopGoods(sh) {
+  return Object.values(sh.items).reduce((t, i) => t + i.qty * i.price_rub, 0);
+}
+function shopFee(sh) {
+  return sh.fee ?? DEFAULT_FEE;
+}
+function cartGoods() {
+  return Object.values(cart.shops).reduce((s, sh) => s + shopGoods(sh), 0);
+}
+function cartDelivery() {
+  return Object.values(cart.shops).reduce((s, sh) => s + shopFee(sh), 0);
+}
+// Итог к оплате: товары всех заведений плюс доставка каждого
 function cartTotal() {
-  return Object.values(cart.shops).reduce((s, sh) =>
-    s + Object.values(sh.items).reduce((t, i) => t + i.qty * i.price_rub, 0), 0);
+  return cartGoods() + cartDelivery();
 }
 function shopCount() {
   return Object.keys(cart.shops).length;
@@ -184,8 +207,9 @@ function qtyIn(shopId, productId) {
 function addToCart(productId) {
   const sid = view.shopId;
   const p = view.products.find(x => x.id === productId);
-  if (!cart.shops[sid]) cart.shops[sid] = { shopId: sid, shopName: view.shopName, items: {} };
+  if (!cart.shops[sid]) cart.shops[sid] = { shopId: sid, shopName: view.shopName, fee: view.fee, items: {} };
   const shop = cart.shops[sid];
+  shop.fee = view.fee;
   const it = shop.items[productId] || { id: p.id, name: p.name, price_rub: p.price_rub, qty: 0 };
   it.qty += 1;
   shop.items[productId] = it;
@@ -217,7 +241,7 @@ function clearCart() {
 function cartBar() {
   if (cartCount() === 0) return '';
   return `<div class="cartbar" onclick="openCart()">
-    Корзина: ${cartCount()} шт. · ${cartTotal()} ₽ · заведений: ${shopCount()} →</div>`;
+    Корзина: ${cartCount()} шт. · ${cartTotal()} ₽ (с доставкой) · заведений: ${shopCount()} →</div>`;
 }
 
 // ---------- Экраны ----------
@@ -240,7 +264,7 @@ async function showCities() {
   html += bottomButtonsHtml();
   if (cartCount() > 0) {
     html += `<button class="card" onclick="openCart()"><b>Корзина</b><br>
-      ${cartCount()} шт. · ${cartTotal()} ₽ · заведений: ${shopCount()}</button>`;
+      ${cartCount()} шт. · ${cartTotal()} ₽ с доставкой · заведений: ${shopCount()}</button>`;
   }
   app.innerHTML = html;
 }
@@ -264,6 +288,7 @@ async function openCity(cityId) {
       <div class="shop-info">
         <b>${esc(s.name)}</b>
         ${s.description ? `<div class="muted">${esc(s.description)}</div>` : ''}
+        <div class="muted">Доставка: ${s.delivery_fee_rub ?? DEFAULT_FEE} ₽</div>
       </div>
     </button>`).join('');
   app.innerHTML = html + cartBar();
@@ -276,7 +301,15 @@ async function openShop(shopId) {
   const { data, error } = await db.from('products').select('*')
     .eq('shop_id', shopId).eq('in_stock', true).order('sort_order');
   if (error) return showError(error, () => openShop(shopId));
-  view = { shopId, shopName: shop?.name || '', products: data, query: '', parentId: null, path: [] };
+  view = {
+    shopId,
+    shopName: shop?.name || '',
+    fee: shop?.delivery_fee_rub ?? DEFAULT_FEE,
+    products: data,
+    query: '',
+    parentId: null,
+    path: [],
+  };
   renderProducts();
 }
 
@@ -318,6 +351,7 @@ function renderProducts() {
   const backLabel = view.path.length ? '← Назад' : '← Кафе и рестораны';
   app.innerHTML = `<button class="back" onclick="goBack()">${backLabel}</button>
     <h1>${esc(title)}</h1>
+    <p class="muted">Доставка: ${view.fee} ₽</p>
     <input class="search" id="search" type="search" placeholder="Поиск по товарам"
       value="${esc(view.query)}" oninput="onSearch(this.value)">
     <div id="plist"></div>` + cartBar();
@@ -393,7 +427,7 @@ function openCart() {
     '<h1>Корзина</h1>';
   for (const shop of Object.values(cart.shops)) {
     const items = Object.values(shop.items);
-    const subtotal = items.reduce((s, i) => s + i.qty * i.price_rub, 0);
+    const goods = shopGoods(shop);
     html += `<div class="shop-title">${esc(shop.shopName)}</div>`;
     html += items.map(i => `<div class="card">
         <b>${esc(i.name)}</b>
@@ -404,9 +438,10 @@ function openCart() {
           <button onclick="changeQty(${shop.shopId}, ${i.id}, 1)">+</button>
         </div>
       </div>`).join('');
-    html += `<p class="muted">Заказ из этого заведения: ${subtotal} ₽</p>`;
+    html += `<p class="muted">Товары: ${goods} ₽ · доставка: ${shopFee(shop)} ₽ · заведение: ${goods + shopFee(shop)} ₽</p>`;
   }
-  html += `<p class="price">Итого: ${cartTotal()} ₽</p>
+  html += `<p class="muted">Товаров на ${cartGoods()} ₽, доставка ${cartDelivery()} ₽</p>
+    <p class="price">Итого к оплате: ${cartTotal()} ₽</p>
     <p class="muted">Каждое заведение оформляется отдельным заказом, и вам придёт отдельное сообщение.</p>
     <button class="add" onclick="openForm()">Оформить заказ</button>
     <button class="danger" onclick="clearCart()">Очистить корзину</button>`;
@@ -479,16 +514,20 @@ function checkForm() {
 
 function renderConfirm() {
   screen = 'confirm';
-  const lines = Object.values(cart.shops).map(s => `
+  const lines = Object.values(cart.shops).map(s => {
+    const goods = shopGoods(s);
+    return `
     <div class="shop-title">${esc(s.shopName)}</div>
     ${Object.values(s.items).map(i =>
       `<p class="muted" style="margin:4px 0">${esc(i.name)} × ${i.qty} = ${i.price_rub * i.qty} ₽</p>`
-    ).join('')}`).join('');
+    ).join('')}
+    <p class="muted" style="margin:4px 0">Доставка: ${shopFee(s)} ₽ · заведение: ${goods + shopFee(s)} ₽</p>`;
+  }).join('');
   app.innerHTML = `
     <button class="back" onclick="openForm()">← Изменить данные</button>
     <h1>Проверьте заказ</h1>
     ${lines}
-    <p class="price">Итого: ${cartTotal()} ₽</p>
+    <p class="price">Итого к оплате: ${cartTotal()} ₽</p>
     <p class="muted">Имя: ${esc(formData.name)}<br>
       Телефон: ${esc(formData.phone)}<br>
       Доставка: ${formData.type === 'hotel' ? 'в отель' : 'в квартиру'}<br>
@@ -531,7 +570,7 @@ async function sendOrder() {
   emptyCart();
   formData = null;
   app.innerHTML = `<h1>Спасибо!</h1>${list}
-    <p><b>Итого: ${data.total} ₽.</b> Мы свяжемся с вами по телефону.</p>
+    <p><b>Итого: ${data.total} ₽ (с доставкой).</b> Мы свяжемся с вами по телефону.</p>
     <p>По вопросам по заказу пишите: <a href="https://t.me/${SUPPORT_NICK}">@${SUPPORT_NICK}</a></p>
     <button class="add" onclick="showCities()">В каталог</button>`;
 }
