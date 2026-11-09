@@ -11,6 +11,7 @@
   input, select, textarea { width: 100%; box-sizing: border-box; padding: 8px; margin: 4px 0 10px;
     font-size: 15px; border: 1px solid #bbb; border-radius: 6px; }
   input[type=checkbox] { width: auto; }
+  input[type=color] { width: 70px; height: 40px; padding: 2px; margin: 4px 8px 10px 0; }
   button { padding: 8px 14px; margin: 0 4px 8px 0; border: none; border-radius: 6px;
     background: #2481cc; color: #fff; font-size: 14px; cursor: pointer; }
   button.secondary { background: #888; }
@@ -52,6 +53,16 @@
   <h2>Кнопки внизу списка городов</h2>
   <p class="muted">Две кнопки в ряд. Для каждой укажите картинку, подпись и ссылку. Ссылка должна начинаться с https://</p>
   <div id="bottomBtns"></div>
+
+  <h2>Кнопка «Назад» в приложении</h2>
+  <div class="box">
+    <label class="muted">Цвет фона</label>
+    <input type="color" id="fbBg" value="#2481cc">
+    <label class="muted">Цвет текста</label>
+    <input type="color" id="fbColor" value="#ffffff">
+    <div><button onclick="saveBackStyle()">Сохранить цвета</button></div>
+    <p class="muted">Кнопка появится в правом нижнем углу всех экранов клиента, кроме списка городов.</p>
+  </div>
 
   <h2>Кафе и рестораны</h2>
   <select id="citySelect" onchange="loadShops()"></select>
@@ -164,6 +175,22 @@ function showPanel() {
   $('panel').classList.remove('hidden');
   loadCities();
   loadBottom();
+  loadBackStyle();
+}
+
+// ---------- Цвета кнопки «Назад» ----------
+async function loadBackStyle() {
+  const { data } = await db.from('app_settings').select('*').eq('id', 1).maybeSingle();
+  $('fbBg').value = data?.back_bg || '#2481cc';
+  $('fbColor').value = data?.back_color || '#ffffff';
+}
+
+async function saveBackStyle() {
+  const { error } = await db.from('app_settings').upsert(
+    { id: 1, back_bg: $('fbBg').value, back_color: $('fbColor').value },
+    { onConflict: 'id' });
+  if (error) return say(error.message);
+  say('Цвета кнопки сохранены', true);
 }
 
 // ---------- Кнопки внизу списка городов ----------
