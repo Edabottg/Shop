@@ -58,9 +58,11 @@
   <div id="products"></div>
 
   <h2 id="formTitle">Новый товар</h2>
-  <input id="pName" placeholder="Название">
+  <label class="muted">Входит в группу</label>
+  <select id="pParent"></select>
+  <input id="pName" placeholder="Название, например «Лимонад» или «Мохито»">
   <textarea id="pDesc" rows="2" placeholder="Описание (необязательно)"></textarea>
-  <input id="pPrice" type="number" placeholder="Цена, ₽">
+  <input id="pPrice" type="number" placeholder="Цена, ₽ (для группы можно оставить пустым)">
   <input id="pImage" type="file" accept="image/*">
   <p class="muted" id="pImageNote"></p>
   <label><input type="checkbox" id="pStock" checked> В наличии</label>
@@ -240,7 +242,7 @@ async function saveShopPhoto(id) {
   }
 }
 
-// ---------- Товары ----------
+// ---------- Товары и группы ----------
 async function loadProducts() {
   const shopId = $('shopSelect').value;
   if (!shopId) {
@@ -255,15 +257,41 @@ async function loadProducts() {
   renderProducts();
 }
 
+// Строит список в порядке дерева: группа, затем её варианты с отступом
+function flatTree(parentId = null, depth = 0, out = []) {
+  products.filter(p => (p.parent_id ?? null) === parentId).forEach(p => {
+    out.push({ p, depth });
+    flatTree(p.id, depth + 1, out);
+  });
+  return out;
+}
+
+function descendantIds(id) {
+  return id == null ? [] : flatTree(id).map(x => x.p.id);
+}
+
 function renderProducts() {
-  $('products').innerHTML = products.map(p => `
-    <div class="row">
+  const rows = flatTree();
+  $('products').innerHTML = rows.map(({ p, depth }) => `
+    <div class="row" style="padding-left:${depth * 24}px">
       ${p.image_url ? `<img class="thumb" src="${esc(p.image_url)}" alt="">` : '<div class="thumb"></div>'}
-      <span><b>${esc(p.name)}</b><br>${p.price_rub} ₽ ·
+      <span>${depth ? '↳ ' : ''}<b>${esc(p.name)}</b><br>
+        ${p.price_rub != null ? p.price_rub + ' ₽' : '<span class="muted">без цены (группа)</span>'} ·
         ${p.in_stock ? 'в наличии' : '<span class="muted">нет в наличии</span>'}</span>
       <button class="secondary" onclick="editProduct(${p.id})">Изменить</button>
-      <button class="danger" onclick="delRow('products', ${p.id}, 'Удалить товар?')">Удалить</button>
+      <button class="danger" onclick="delRow('products', ${p.id}, 'Удалить товар и все его варианты?')">Удалить</button>
     </div>`).join('') || '<p class="muted">В этом заведении товаров нет</p>';
+  fillParentOptions();
+}
+
+function fillParentOptions() {
+  const excluded = new Set([editId, ...descendantIds(editId)]);
+  const current = $('pParent').value;
+  const opts = flatTree()
+    .filter(({ p }) => !excluded.has(p.id))
+    .map(({ p, depth }) => `<option value="${p.id}">${'— '.repeat(depth)}${esc(p.name)}</option>`);
+  $('pParent').innerHTML = '<option value="">— верхний уровень —</option>' + opts.join('');
+  $('pParent').value = current;
 }
 
 function editProduct(id) {
@@ -272,13 +300,15 @@ function editProduct(id) {
   currentImageUrl = p.image_url;
   $('pName').value = p.name;
   $('pDesc').value = p.description || '';
-  $('pPrice').value = p.price_rub;
+  $('pPrice').value = p.price_rub ?? '';
   $('pStock').checked = p.in_stock;
   $('pImage').value = '';
   $('pImageNote').textContent = p.image_url
     ? 'Фото уже есть. Выберите новое, чтобы заменить.'
     : 'Фото нет.';
   $('formTitle').textContent = 'Редактирование товара';
+  fillParentOptions();
+  $('pParent').value = p.parent_id ?? '';
   $('formTitle').scrollIntoView();
 }
 
@@ -290,14 +320,19 @@ function clearProductForm() {
   $('pStock').checked = true;
   $('pImageNote').textContent = '';
   $('formTitle').textContent = 'Новый товар';
+  fillParentOptions();
+  $('pParent').value = '';
 }
 
 async function saveProduct() {
   const shopId = Number($('shopSelect').value);
   const name = $('pName').value.trim();
-  const price = parseInt($('pPrice').value);
+  const priceRaw = $('pPrice').value.trim();
+  const price = priceRaw === '' ? null : parseInt(priceRaw);
+  const parentRaw = $('pParent').value;
   if (!shopId) return say('Сначала выберите заведение');
-  if (!name || !price) return say('Укажите название и цену');
+  if (!name) return say('Укажите название');
+  if (priceRaw !== '' && (!price || price < 0)) return say('Цена должна быть больше нуля или поле пустое');
 
   let imageUrl = currentImageUrl;
   const file = $('pImage').files[0];
@@ -308,6 +343,7 @@ async function saveProduct() {
 
   const row = {
     shop_id: shopId,
+    parent_id: parentRaw ? Number(parentRaw) : null,
     name,
     description: $('pDesc').value.trim() || null,
     price_rub: price,
