@@ -6,17 +6,19 @@
 <title>Админка</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; max-width: 720px; }
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; max-width: 760px; }
   h2 { margin: 28px 0 8px; font-size: 18px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
   input, select, textarea { width: 100%; box-sizing: border-box; padding: 8px; margin: 4px 0 10px;
     font-size: 15px; border: 1px solid #bbb; border-radius: 6px; }
   input[type=checkbox] { width: auto; }
-  button { padding: 8px 14px; margin: 0 6px 8px 0; border: none; border-radius: 6px;
+  button { padding: 8px 14px; margin: 0 4px 8px 0; border: none; border-radius: 6px;
     background: #2481cc; color: #fff; font-size: 14px; cursor: pointer; }
   button.secondary { background: #888; }
   button.danger { background: #c0392b; }
-  .row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #eee; }
-  .row span { flex: 1; }
+  button.arrow { padding: 8px 10px; background: #e7eef5; color: #2481cc; font-size: 14px; }
+  button:disabled { opacity: .35; cursor: default; }
+  .row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #eee; }
+  .row span { flex: 1; min-width: 0; }
   .row input[type=file] { width: 130px; margin: 0; font-size: 12px; }
   .muted { color: #888; font-size: 13px; }
   .thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; flex-shrink: 0; background: #eee; }
@@ -100,6 +102,36 @@ async function uploadFile(file) {
   return db.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
 }
 
+// ---------- Порядок: двигаем элемент на одну позицию вверх или вниз ----------
+// Перед сдвигом все соседи получают номера 1, 2, 3... по текущему порядку,
+// поэтому даже одинаковые значения сортировки меняются корректно.
+async function moveInList(table, list, id, dir, reload) {
+  const i = list.findIndex(x => x.id === id);
+  const t = i + dir;
+  if (i < 0 || t < 0 || t >= list.length) return;
+  const ordered = [...list];
+  [ordered[i], ordered[t]] = [ordered[t], ordered[i]];
+  const results = await Promise.all(ordered.map((item, n) =>
+    db.from(table).update({ sort_order: n + 1 }).eq('id', item.id)));
+  const failed = results.find(r => r.error);
+  if (failed) return say(failed.error.message);
+  say('Порядок изменён', true);
+  reload();
+}
+
+function moveCity(id, dir) {
+  return moveInList('cities', cities, id, dir, loadCities);
+}
+function moveShop(id, dir) {
+  return moveInList('shops', shops, id, dir, loadShops);
+}
+function moveProduct(id, dir) {
+  const item = products.find(p => p.id === id);
+  if (!item) return;
+  const siblings = products.filter(p => (p.parent_id ?? null) === (item.parent_id ?? null));
+  return moveInList('products', siblings, id, dir, loadProducts);
+}
+
 // ---------- Вход ----------
 async function init() {
   const { data } = await db.auth.getSession();
@@ -133,10 +165,12 @@ async function loadCities() {
   if (error) return say(error.message);
   cities = data;
   $('citySelect').innerHTML = cities.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
-  $('cities').innerHTML = cities.map(c => `
+  $('cities').innerHTML = cities.map((c, i) => `
     <div class="row">
       ${c.image_url ? `<img class="thumb" src="${esc(c.image_url)}" alt="">` : '<div class="thumb"></div>'}
       <span>${esc(c.name)}</span>
+      <button class="arrow" onclick="moveCity(${c.id}, -1)" ${i === 0 ? 'disabled' : ''}>▲</button>
+      <button class="arrow" onclick="moveCity(${c.id}, 1)" ${i === cities.length - 1 ? 'disabled' : ''}>▼</button>
       <input type="file" accept="image/*" id="cityPhoto_${c.id}">
       <button class="secondary" onclick="saveCityPhoto(${c.id})">Фото</button>
       <button class="danger" onclick="delRow('cities', ${c.id}, 'Удалить город со всеми заведениями и товарами?')">Удалить</button>
@@ -192,10 +226,12 @@ async function loadShops() {
 }
 
 function renderShops() {
-  $('shops').innerHTML = shops.map(s => `
+  $('shops').innerHTML = shops.map((s, i) => `
     <div class="row">
       ${s.image_url ? `<img class="thumb" src="${esc(s.image_url)}" alt="">` : '<div class="thumb"></div>'}
       <span><b>${esc(s.name)}</b>${s.phone ? ' · ' + esc(s.phone) : ''}</span>
+      <button class="arrow" onclick="moveShop(${s.id}, -1)" ${i === 0 ? 'disabled' : ''}>▲</button>
+      <button class="arrow" onclick="moveShop(${s.id}, 1)" ${i === shops.length - 1 ? 'disabled' : ''}>▼</button>
       <input type="file" accept="image/*" id="shopPhoto_${s.id}">
       <button class="secondary" onclick="saveShopPhoto(${s.id})">Фото</button>
       <button class="danger" onclick="delRow('shops', ${s.id}, 'Удалить заведение со всеми товарами?')">Удалить</button>
@@ -272,15 +308,21 @@ function descendantIds(id) {
 
 function renderProducts() {
   const rows = flatTree();
-  $('products').innerHTML = rows.map(({ p, depth }) => `
+  $('products').innerHTML = rows.map(({ p, depth }) => {
+    const siblings = products.filter(x => (x.parent_id ?? null) === (p.parent_id ?? null));
+    const idx = siblings.findIndex(x => x.id === p.id);
+    return `
     <div class="row" style="padding-left:${depth * 24}px">
       ${p.image_url ? `<img class="thumb" src="${esc(p.image_url)}" alt="">` : '<div class="thumb"></div>'}
       <span>${depth ? '↳ ' : ''}<b>${esc(p.name)}</b><br>
         ${p.price_rub != null ? p.price_rub + ' ₽' : '<span class="muted">без цены (группа)</span>'} ·
         ${p.in_stock ? 'в наличии' : '<span class="muted">нет в наличии</span>'}</span>
+      <button class="arrow" onclick="moveProduct(${p.id}, -1)" ${idx === 0 ? 'disabled' : ''}>▲</button>
+      <button class="arrow" onclick="moveProduct(${p.id}, 1)" ${idx === siblings.length - 1 ? 'disabled' : ''}>▼</button>
       <button class="secondary" onclick="editProduct(${p.id})">Изменить</button>
       <button class="danger" onclick="delRow('products', ${p.id}, 'Удалить товар и все его варианты?')">Удалить</button>
-    </div>`).join('') || '<p class="muted">В этом заведении товаров нет</p>';
+    </div>`;
+  }).join('') || '<p class="muted">В этом заведении товаров нет</p>';
   fillParentOptions();
 }
 
@@ -350,6 +392,12 @@ async function saveProduct() {
     image_url: imageUrl,
     in_stock: $('pStock').checked,
   };
+
+  // Новый товар ставим в конец своей группы
+  if (!editId) {
+    const siblings = products.filter(p => (p.parent_id ?? null) === row.parent_id);
+    row.sort_order = siblings.length + 1;
+  }
 
   const request = editId
     ? db.from('products').update(row).eq('id', editId)
