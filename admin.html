@@ -20,8 +20,10 @@
   .row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #eee; }
   .row span { flex: 1; min-width: 0; }
   .row input[type=file] { width: 130px; margin: 0; font-size: 12px; }
+  .box { padding: 10px 0; border-bottom: 1px solid #eee; }
   .muted { color: #888; font-size: 13px; }
   .thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; flex-shrink: 0; background: #eee; }
+  .wide { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; flex-shrink: 0; background: #eee; }
   .err { color: #c0392b; min-height: 20px; }
   .hidden { display: none; }
 </style>
@@ -45,6 +47,10 @@
   <input id="newCity" placeholder="Название города">
   <input id="newCityPhoto" type="file" accept="image/*">
   <button onclick="addCity()">Добавить город</button>
+
+  <h2>Кнопки внизу списка городов</h2>
+  <p class="muted">Две кнопки в ряд. Для каждой укажите картинку, подпись и ссылку. Ссылка должна начинаться с https://</p>
+  <div id="bottomBtns"></div>
 
   <h2>Кафе и рестораны</h2>
   <select id="citySelect" onchange="loadShops()"></select>
@@ -103,8 +109,6 @@ async function uploadFile(file) {
 }
 
 // ---------- Порядок: двигаем элемент на одну позицию вверх или вниз ----------
-// Перед сдвигом все соседи получают номера 1, 2, 3... по текущему порядку,
-// поэтому даже одинаковые значения сортировки меняются корректно.
 async function moveInList(table, list, id, dir, reload) {
   const i = list.findIndex(x => x.id === id);
   const t = i + dir;
@@ -157,6 +161,47 @@ function showPanel() {
   $('login').classList.add('hidden');
   $('panel').classList.remove('hidden');
   loadCities();
+  loadBottom();
+}
+
+// ---------- Кнопки внизу списка городов ----------
+async function loadBottom() {
+  const { data, error } = await db.from('bottom_buttons').select('*').order('slot');
+  if (error) return say(error.message);
+  $('bottomBtns').innerHTML = [1, 2].map(slot => {
+    const b = (data || []).find(x => x.slot === slot) || { slot };
+    return `<div class="box">
+      <div class="row">
+        ${b.image_url ? `<img class="wide" src="${esc(b.image_url)}" alt="">` : '<div class="wide"></div>'}
+        <span><b>Кнопка ${slot}</b>${b.title ? ' · ' + esc(b.title) : ''}</span>
+      </div>
+      <input id="bt_${slot}" placeholder="Подпись на кнопке" value="${esc(b.title || '')}">
+      <input id="bl_${slot}" placeholder="Ссылка, например https://t.me/..." value="${esc(b.link_url || '')}">
+      <input type="file" accept="image/*" id="bi_${slot}">
+      <button onclick="saveBottom(${slot})">Сохранить кнопку ${slot}</button>
+    </div>`;
+  }).join('');
+}
+
+async function saveBottom(slot) {
+  const title = $('bt_' + slot).value.trim();
+  const link = $('bl_' + slot).value.trim();
+  if (link && !/^https?:\/\//i.test(link)) return say('Ссылка должна начинаться с https://');
+
+  const { data: current } = await db.from('bottom_buttons').select('image_url').eq('slot', slot).maybeSingle();
+  let image_url = current?.image_url ?? null;
+  const file = $('bi_' + slot).files[0];
+  if (file) {
+    try { image_url = await uploadFile(file); }
+    catch (e) { return say('Картинка: ' + e.message); }
+  }
+
+  const { error } = await db.from('bottom_buttons').upsert(
+    { slot, title: title || null, link_url: link || null, image_url },
+    { onConflict: 'slot' });
+  if (error) return say(error.message);
+  say('Кнопка ' + slot + ' сохранена', true);
+  loadBottom();
 }
 
 // ---------- Города ----------
@@ -293,7 +338,6 @@ async function loadProducts() {
   renderProducts();
 }
 
-// Строит список в порядке дерева: группа, затем её варианты с отступом
 function flatTree(parentId = null, depth = 0, out = []) {
   products.filter(p => (p.parent_id ?? null) === parentId).forEach(p => {
     out.push({ p, depth });
@@ -393,7 +437,6 @@ async function saveProduct() {
     in_stock: $('pStock').checked,
   };
 
-  // Новый товар ставим в конец своей группы
   if (!editId) {
     const siblings = products.filter(p => (p.parent_id ?? null) === row.parent_id);
     row.sort_order = siblings.length + 1;
