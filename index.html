@@ -7,7 +7,7 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-  :root { --city-h: 150px; }
+  :root { --city-h: 150px; --fback-bg: #2481cc; --fback-color: #ffffff; }
   body { font-family: system-ui, sans-serif; margin: 0; padding: 16px 16px 90px;
          background: var(--tg-theme-bg-color, #fff); color: var(--tg-theme-text-color, #000); }
   h1 { font-size: 20px; margin: 8px 0 12px; }
@@ -37,13 +37,12 @@
   .support { display: block; width: 100%; margin-top: 12px; padding: 10px; border: none; background: none;
              color: var(--tg-theme-link-color, #2481cc); font-size: 16px; text-align: center; cursor: pointer; }
   .back { background: none; border: none; color: var(--tg-theme-link-color, #2481cc);
-          font-size: 16px; padding: 0; margin-bottom: 8px; }
+          font-size: 16px; padding: 0; margin-bottom: 8px; cursor: pointer; }
   .price { font-weight: bold; margin-top: 4px; }
   .muted { color: #888; font-size: 14px; }
   .hint { font-size: 13px; color: #888; margin: -6px 0 6px; }
   .add { width: 100%; padding: 14px; margin-top: 8px; border: none; border-radius: 12px; font-size: 16px;
          background: var(--tg-theme-button-color, #2481cc); color: var(--tg-theme-button-text-color, #fff); }
-  .add:disabled { opacity: .6; }
   .danger { width: 100%; padding: 12px; margin-top: 12px; border: none; background: none;
             color: #c0392b; font-size: 15px; }
   .qty { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 8px; }
@@ -67,9 +66,13 @@
   .prow .qty { margin: 0; gap: 8px; }
   .prow .qty button { width: 34px; height: 34px; font-size: 18px; }
   .prow .qty span { font-size: 15px; min-width: 18px; }
-  .cartbar { position: fixed; left: 12px; right: 12px; bottom: 12px; padding: 14px; border-radius: 12px;
+  .cartbar { position: fixed; left: 12px; right: 120px; bottom: 14px; padding: 14px; border-radius: 12px;
              text-align: center; font-weight: bold; cursor: pointer;
              background: var(--tg-theme-button-color, #2481cc); color: var(--tg-theme-button-text-color, #fff); }
+  .fback { position: fixed; right: 14px; bottom: 14px; z-index: 10; display: none; padding: 12px 18px;
+           border: none; border-radius: 24px; font-size: 15px; font-weight: bold; cursor: pointer;
+           background: var(--fback-bg); color: var(--fback-color);
+           box-shadow: 0 6px 18px rgba(0,0,0,.25); }
   .form label { display: block; margin: 12px 0; font-size: 14px; }
   .form input, .form select, .form textarea { width: 100%; box-sizing: border-box; padding: 10px;
     margin-top: 4px; font-size: 16px; border-radius: 8px; border: 1px solid #ccc; }
@@ -79,6 +82,7 @@
 </head>
 <body>
 <div id="app"><p class="muted loading">Загрузка...</p></div>
+<button id="fback" class="fback" onclick="goBackPage()">← Назад</button>
 
 <script>
 const SUPABASE_URL = 'https://uwafdyrpyrcnjliwystd.supabase.co';
@@ -92,12 +96,17 @@ tg?.ready();
 tg?.expand();
 
 const app = document.getElementById('app');
+const fbtn = document.getElementById('fback');
+
+let screen = 'cities';      // текущий экран
 let currentCityId = null;
+let citiesCache = [];
 let shopsCache = [];
-let view = null;      // {shopId, shopName, fee, products, query, parentId, path}
-let formData = null;
-let screen = 'cities';
 let bottomList = [];
+let view = null;            // {shopId, shopName, fee, products, query, parentId, path}
+let formData = null;
+let lastDoneHtml = '';
+let hist = [];              // история экранов для кнопки «Назад»
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c =>
@@ -106,6 +115,7 @@ function esc(s) {
 
 function showLoading() {
   app.innerHTML = '<p class="muted loading">Загрузка...</p>';
+  updateFloat();
 }
 
 function showError(error, retry) {
@@ -113,25 +123,45 @@ function showError(error, retry) {
     <p class="muted">${esc(error?.message || '')}</p>
     <button class="add" id="retryBtn">Повторить</button>`;
   document.getElementById('retryBtn').onclick = retry;
+  updateFloat();
 }
 
-// ---------- Данные Telegram и проверки ----------
-function tgUser() {
-  return window.Telegram?.WebApp?.initDataUnsafe?.user || null;
+// ---------- История и кнопка «Назад» ----------
+function updateFloat() {
+  fbtn.style.display = screen === 'cities' ? 'none' : 'block';
 }
-function tgName() {
-  const u = tgUser();
-  return u ? [u.first_name, u.last_name].filter(Boolean).join(' ') : '';
+
+function pushHist() {
+  hist.push(JSON.parse(JSON.stringify({
+    screen, currentCityId, citiesCache, shopsCache, view, formData,
+  })));
 }
-function normalizePhone(raw) {
-  let s = String(raw || '').replace(/[\s\-()]/g, '');
-  if (/^8\d{10}$/.test(s)) s = '+7' + s.slice(1);
-  if (/^7\d{10}$/.test(s)) s = '+' + s;
-  return /^\+\d{10,15}$/.test(s) ? s : null;
+
+function goBackPage() {
+  if (hist.length === 0) return showCities(false);
+  const s = hist.pop();
+  screen = s.screen;
+  currentCityId = s.currentCityId;
+  citiesCache = s.citiesCache;
+  shopsCache = s.shopsCache;
+  view = s.view;
+  formData = s.formData;
+  renderScreen();
 }
-function cleanNick(raw) {
-  const s = String(raw || '').trim().replace(/^@/, '');
-  return /^[A-Za-z0-9_]{5,32}$/.test(s) ? s : null;
+
+function renderScreen() {
+  if (screen === 'cities') renderCities();
+  else if (screen === 'shops') renderShops();
+  else if (screen === 'products') renderProducts();
+  else if (screen === 'cart') renderCart();
+  else if (screen === 'form') renderForm();
+  else if (screen === 'confirm') renderConfirm();
+  else if (screen === 'done') renderDone();
+}
+
+function resetToCatalog() {
+  hist = [];
+  showCities(false);
 }
 
 // ---------- Внешние ссылки ----------
@@ -158,6 +188,25 @@ function bottomButtonsHtml() {
       ${b.title ? `<span>${esc(b.title)}</span>` : ''}
     </button>`).join('') + '</div>' +
     `<button class="support" onclick="openSupport()">Техническая поддержка</button>`;
+}
+
+// ---------- Данные Telegram и проверки ----------
+function tgUser() {
+  return window.Telegram?.WebApp?.initDataUnsafe?.user || null;
+}
+function tgName() {
+  const u = tgUser();
+  return u ? [u.first_name, u.last_name].filter(Boolean).join(' ') : '';
+}
+function normalizePhone(raw) {
+  let s = String(raw || '').replace(/[\s\-()]/g, '');
+  if (/^8\d{10}$/.test(s)) s = '+7' + s.slice(1);
+  if (/^7\d{10}$/.test(s)) s = '+' + s;
+  return /^\+\d{10,15}$/.test(s) ? s : null;
+}
+function cleanNick(raw) {
+  const s = String(raw || '').trim().replace(/^@/, '');
+  return /^[A-Za-z0-9_]{5,32}$/.test(s) ? s : null;
 }
 
 // ---------- Корзина: {shops: {shopId: {shopId, shopName, fee, items: {productId: {...}}}}} ----------
@@ -193,7 +242,6 @@ function cartGoods() {
 function cartDelivery() {
   return Object.values(cart.shops).reduce((s, sh) => s + shopFee(sh), 0);
 }
-// Итог к оплате: товары всех заведений плюс доставка каждого
 function cartTotal() {
   return cartGoods() + cartDelivery();
 }
@@ -225,51 +273,57 @@ function changeQty(shopId, productId, delta) {
   if (it.qty <= 0) delete shop.items[productId];
   if (Object.keys(shop.items).length === 0) delete cart.shops[shopId];
   saveCart();
-  if (screen === 'cart') {
-    openCart();
-  } else {
-    renderProducts();
-  }
+  if (screen === 'cart') renderCart();
+  else renderProducts();
 }
 
 function clearCart() {
   if (!confirm('Очистить корзину?')) return;
   emptyCart();
-  showCities();
+  resetToCatalog();
 }
 
 function cartBar() {
   if (cartCount() === 0) return '';
   return `<div class="cartbar" onclick="openCart()">
-    Корзина: ${cartCount()} шт. · ${cartTotal()} ₽ (с доставкой) · заведений: ${shopCount()} →</div>`;
+    Корзина: ${cartCount()} шт. · ${cartTotal()} ₽ · заведений: ${shopCount()} →</div>`;
 }
 
-// ---------- Экраны ----------
-async function showCities() {
+// ---------- Города ----------
+async function showCities(push = true) {
+  if (push) pushHist();
   screen = 'cities';
   showLoading();
   const [cr, br] = await Promise.all([
     db.from('cities').select('*').order('sort_order'),
     db.from('bottom_buttons').select('*').order('slot'),
   ]);
-  if (cr.error) return showError(cr.error, showCities);
+  if (cr.error) return showError(cr.error, () => showCities(false));
+  citiesCache = cr.data;
   bottomList = br.error ? [] : (br.data || []);
+  renderCities();
+}
 
-  let html = '<h1>Выберите город</h1>' + cr.data.map(c => `
+function renderCities() {
+  screen = 'cities';
+  let html = '<h1>Выберите город</h1>' + citiesCache.map(c => `
     <button class="city" onclick="openCity(${c.id})">
       ${c.image_url ? `<img src="${esc(c.image_url)}" alt="">` : ''}
       <span>${esc(c.name)}</span>
     </button>`).join('');
-  if (cr.data.length === 0) html += '<p class="muted">Городов пока нет.</p>';
+  if (citiesCache.length === 0) html += '<p class="muted">Городов пока нет.</p>';
   html += bottomButtonsHtml();
   if (cartCount() > 0) {
     html += `<button class="card" onclick="openCart()"><b>Корзина</b><br>
       ${cartCount()} шт. · ${cartTotal()} ₽ с доставкой · заведений: ${shopCount()}</button>`;
   }
   app.innerHTML = html;
+  updateFloat();
 }
 
+// ---------- Заведения ----------
 async function openCity(cityId) {
+  pushHist();
   currentCityId = cityId;
   screen = 'shops';
   showLoading();
@@ -277,10 +331,15 @@ async function openCity(cityId) {
     .eq('city_id', cityId).order('sort_order');
   if (error) return showError(error, () => openCity(cityId));
   shopsCache = data;
-  let html = '<button class="back" onclick="showCities()">← Города</button>' +
+  renderShops();
+}
+
+function renderShops() {
+  screen = 'shops';
+  let html = '<button class="back" onclick="goBackPage()">← Города</button>' +
     '<h1>Кафе и рестораны</h1>';
-  if (data.length === 0) html += '<p class="muted">В этом городе пока нет заведений.</p>';
-  html += data.map(s => `
+  if (shopsCache.length === 0) html += '<p class="muted">В этом городе пока нет заведений.</p>';
+  html += shopsCache.map(s => `
     <button class="card shop" onclick="openShop(${s.id})">
       ${s.image_url
         ? `<img class="shop-img" src="${esc(s.image_url)}" alt="">`
@@ -292,9 +351,11 @@ async function openCity(cityId) {
       </div>
     </button>`).join('');
   app.innerHTML = html + cartBar();
+  updateFloat();
 }
 
 async function openShop(shopId) {
+  pushHist();
   screen = 'products';
   showLoading();
   const shop = shopsCache.find(s => s.id === shopId);
@@ -330,17 +391,10 @@ function minPrice(id) {
 }
 
 function openFolder(id) {
+  pushHist();
   const p = view.products.find(x => x.id === id);
   view.path.push({ id, name: p.name });
   view.parentId = id;
-  view.query = '';
-  renderProducts();
-}
-
-function goBack() {
-  if (view.path.length === 0) return openCity(currentCityId);
-  view.path.pop();
-  view.parentId = view.path.length ? view.path[view.path.length - 1].id : null;
   view.query = '';
   renderProducts();
 }
@@ -349,13 +403,14 @@ function renderProducts() {
   screen = 'products';
   const title = view.path.length ? view.path[view.path.length - 1].name : view.shopName;
   const backLabel = view.path.length ? '← Назад' : '← Кафе и рестораны';
-  app.innerHTML = `<button class="back" onclick="goBack()">${backLabel}</button>
+  app.innerHTML = `<button class="back" onclick="goBackPage()">${backLabel}</button>
     <h1>${esc(title)}</h1>
     <p class="muted">Доставка: ${view.fee} ₽</p>
     <input class="search" id="search" type="search" placeholder="Поиск по товарам"
       value="${esc(view.query)}" oninput="onSearch(this.value)">
     <div id="plist"></div>` + cartBar();
   renderList();
+  updateFloat();
 }
 
 function onSearch(value) {
@@ -420,11 +475,24 @@ function productRow(p) {
   </div>`;
 }
 
+// ---------- Корзина ----------
 function openCart() {
-  if (cartCount() === 0) return showCities();
+  if (cartCount() === 0) return showCities(true);
+  pushHist();
+  renderCart();
+}
+
+function renderCart() {
   screen = 'cart';
-  let html = `<button class="back" onclick="${view ? 'renderProducts()' : 'showCities()'}">← Назад</button>` +
-    '<h1>Корзина</h1>';
+  if (cartCount() === 0) {
+    app.innerHTML = `<button class="back" onclick="goBackPage()">← Назад</button>
+      <h1>Корзина пуста</h1>
+      <p class="muted">Добавьте товары из заведений.</p>
+      <button class="add" onclick="resetToCatalog()">В каталог</button>`;
+    updateFloat();
+    return;
+  }
+  let html = '<button class="back" onclick="goBackPage()">← Назад</button><h1>Корзина</h1>';
   for (const shop of Object.values(cart.shops)) {
     const items = Object.values(shop.items);
     const goods = shopGoods(shop);
@@ -446,10 +514,16 @@ function openCart() {
     <button class="add" onclick="openForm()">Оформить заказ</button>
     <button class="danger" onclick="clearCart()">Очистить корзину</button>`;
   app.innerHTML = html;
+  updateFloat();
 }
 
 // ---------- Оформление ----------
 function openForm() {
+  pushHist();
+  renderForm();
+}
+
+function renderForm() {
   screen = 'form';
   const u = tgUser();
   const d = formData || {
@@ -460,7 +534,7 @@ function openForm() {
     addr: '',
   };
   app.innerHTML = `
-    <button class="back" onclick="openCart()">← Корзина</button>
+    <button class="back" onclick="goBackPage()">← Корзина</button>
     <h1>Оформление заказа</h1>
     <div class="form">
       <label>Имя<input id="f_name" type="text" value="${esc(d.name)}"></label>
@@ -482,6 +556,7 @@ function openForm() {
       <p id="f_msg" class="muted"></p>
     </div>`;
   updateAddrLabel();
+  updateFloat();
 }
 
 function updateAddrLabel() {
@@ -509,6 +584,7 @@ function checkForm() {
   if (addr.length < 5) { msg.textContent = 'Укажите адрес полностью.'; return; }
 
   formData = { name, phone, nick: nickRaw, type, addr };
+  pushHist();
   renderConfirm();
 }
 
@@ -524,7 +600,7 @@ function renderConfirm() {
     <p class="muted" style="margin:4px 0">Доставка: ${shopFee(s)} ₽ · заведение: ${goods + shopFee(s)} ₽</p>`;
   }).join('');
   app.innerHTML = `
-    <button class="back" onclick="openForm()">← Изменить данные</button>
+    <button class="back" onclick="goBackPage()">← Изменить данные</button>
     <h1>Проверьте заказ</h1>
     ${lines}
     <p class="price">Итого к оплате: ${cartTotal()} ₽</p>
@@ -534,6 +610,7 @@ function renderConfirm() {
       Адрес: ${esc(formData.addr)}</p>
     <button class="add" id="sendBtn" onclick="sendOrder()">Подтвердить и отправить</button>
     <p id="f_msg" class="muted"></p>`;
+  updateFloat();
 }
 
 async function sendOrder() {
@@ -567,15 +644,34 @@ async function sendOrder() {
 
   const list = data.orders.map(o =>
     `<p>Заказ №${o.order_id} · ${esc(o.shop_name)} · ${o.total} ₽</p>`).join('');
-  emptyCart();
-  formData = null;
-  app.innerHTML = `<h1>Спасибо!</h1>${list}
+  lastDoneHtml = `<h1>Спасибо!</h1>${list}
     <p><b>Итого: ${data.total} ₽ (с доставкой).</b> Мы свяжемся с вами по телефону.</p>
     <p>По вопросам по заказу пишите: <a href="https://t.me/${SUPPORT_NICK}">@${SUPPORT_NICK}</a></p>
-    <button class="add" onclick="showCities()">В каталог</button>`;
+    <button class="add" onclick="resetToCatalog()">В каталог</button>`;
+  emptyCart();
+  formData = null;
+  hist = [];
+  screen = 'done';
+  renderDone();
 }
 
-showCities();
+function renderDone() {
+  screen = 'done';
+  app.innerHTML = lastDoneHtml;
+  updateFloat();
+}
+
+// ---------- Старт ----------
+async function loadSettings() {
+  const { data } = await db.from('app_settings').select('*').eq('id', 1).maybeSingle();
+  if (!data) return;
+  const root = document.documentElement.style;
+  if (data.back_bg) root.setProperty('--fback-bg', data.back_bg);
+  if (data.back_color) root.setProperty('--fback-color', data.back_color);
+}
+
+loadSettings();
+showCities(false);
 </script>
 </body>
 </html>
