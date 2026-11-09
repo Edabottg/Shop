@@ -30,8 +30,6 @@
   .price { font-weight: bold; margin-top: 4px; }
   .muted { color: #888; font-size: 14px; }
   .hint { font-size: 13px; color: #888; margin: -6px 0 6px; }
-  .photo { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 10px;
-           margin-top: 6px; display: block; }
   .add { width: 100%; padding: 14px; margin-top: 8px; border: none; border-radius: 12px; font-size: 16px;
          background: var(--tg-theme-button-color, #2481cc); color: var(--tg-theme-button-text-color, #fff); }
   .add:disabled { opacity: .6; }
@@ -41,8 +39,26 @@
   .qty button { width: 44px; height: 44px; border: none; border-radius: 10px; font-size: 22px;
                 background: var(--tg-theme-button-color, #2481cc); color: var(--tg-theme-button-text-color, #fff); }
   .qty span { font-size: 18px; min-width: 24px; text-align: center; }
-  .search { width: 100%; box-sizing: border-box; padding: 10px 12px; margin: 6px 0 4px; font-size: 16px;
+  .search { width: 100%; box-sizing: border-box; padding: 10px 12px; margin: 6px 0 8px; font-size: 16px;
             border-radius: 10px; border: 1px solid #ccc; }
+
+  /* Строка товара: маленькая миниатюра слева, название и цена справа */
+  .prow { display: flex; align-items: center; gap: 10px; padding: 8px; margin: 6px 0;
+          border-radius: 12px; background: var(--tg-theme-secondary-bg-color, #f1f1f1); cursor: pointer; }
+  .pthumb { width: 88px; height: 88px; object-fit: cover; border-radius: 10px; flex-shrink: 0;
+            background: #ddd; display: block; margin: 0; }
+  .pinfo { flex: 1; min-width: 0; }
+  .pinfo b { font-size: 15px; }
+  .pinfo .muted { font-size: 12px; margin-top: 2px; }
+  .pinfo .price { font-size: 15px; }
+  .paction { flex-shrink: 0; }
+  .pgo { font-size: 26px; color: #888; padding-right: 4px; }
+  .addsmall { width: 40px; height: 40px; border: none; border-radius: 10px; font-size: 22px;
+              background: var(--tg-theme-button-color, #2481cc); color: var(--tg-theme-button-text-color, #fff); }
+  .prow .qty { margin: 0; gap: 8px; }
+  .prow .qty button { width: 34px; height: 34px; font-size: 18px; }
+  .prow .qty span { font-size: 15px; min-width: 18px; }
+
   .cartbar { position: fixed; left: 12px; right: 12px; bottom: 12px; padding: 14px; border-radius: 12px;
              text-align: center; font-weight: bold; cursor: pointer;
              background: var(--tg-theme-button-color, #2481cc); color: var(--tg-theme-button-text-color, #fff); }
@@ -69,8 +85,8 @@ tg?.expand();
 const app = document.getElementById('app');
 let currentCityId = null;
 let shopsCache = [];
-let view = null;      // {shopId, shopName, products, query}
-let formData = null;  // данные формы, сохраняются при переходе назад
+let view = null;      // {shopId, shopName, products, query, parentId, path}
+let formData = null;
 let screen = 'cities';
 
 function esc(s) {
@@ -229,14 +245,49 @@ async function openShop(shopId) {
   const { data, error } = await db.from('products').select('*')
     .eq('shop_id', shopId).eq('in_stock', true).order('sort_order');
   if (error) return showError(error, () => openShop(shopId));
-  view = { shopId, shopName: shop?.name || '', products: data, query: '' };
+  view = { shopId, shopName: shop?.name || '', products: data, query: '', parentId: null, path: [] };
+  renderProducts();
+}
+
+// ---------- Группы (папки) и товары ----------
+function childrenOf(parentId) {
+  return view.products.filter(p => (p.parent_id ?? null) === parentId);
+}
+function hasChildren(id) {
+  return view.products.some(p => p.parent_id === id);
+}
+// Минимальная цена внутри группы (учитывая вложенные группы)
+function minPrice(id) {
+  let min = null;
+  for (const c of childrenOf(id)) {
+    const v = hasChildren(c.id) ? minPrice(c.id) : c.price_rub;
+    if (v != null && (min == null || v < min)) min = v;
+  }
+  return min;
+}
+
+function openFolder(id) {
+  const p = view.products.find(x => x.id === id);
+  view.path.push({ id, name: p.name });
+  view.parentId = id;
+  view.query = '';
+  renderProducts();
+}
+
+function goBack() {
+  if (view.path.length === 0) return openCity(currentCityId);
+  view.path.pop();
+  view.parentId = view.path.length ? view.path[view.path.length - 1].id : null;
+  view.query = '';
   renderProducts();
 }
 
 function renderProducts() {
   screen = 'products';
-  app.innerHTML = `<button class="back" onclick="openCity(${currentCityId})">← Кафе и рестораны</button>
-    <h1>${esc(view.shopName)}</h1>
+  const title = view.path.length ? view.path[view.path.length - 1].name : view.shopName;
+  const backLabel = view.path.length ? '← Назад' : '← Кафе и рестораны';
+  app.innerHTML = `<button class="back" onclick="goBack()">${backLabel}</button>
+    <h1>${esc(title)}</h1>
     <input class="search" id="search" type="search" placeholder="Поиск по товарам"
       value="${esc(view.query)}" oninput="onSearch(this.value)">
     <div id="plist"></div>` + cartBar();
@@ -256,26 +307,53 @@ function renderList() {
     return;
   }
   const q = view.query.trim().toLowerCase();
-  const list = view.products.filter(p => !q || p.name.toLowerCase().includes(q));
+  // При поиске показываем все подходящие товары из заведения (без групп)
+  const list = q
+    ? view.products.filter(p => !hasChildren(p.id) && p.name.toLowerCase().includes(q))
+    : childrenOf(view.parentId);
   el.innerHTML = list.length
-    ? list.map(productCard).join('')
+    ? list.map(productRow).join('')
     : '<p class="muted">Ничего не найдено.</p>';
 }
 
-function productCard(p) {
+function productRow(p) {
+  const img = p.image_url
+    ? `<img class="pthumb" src="${esc(p.image_url)}" alt="">`
+    : '<div class="pthumb"></div>';
+
+  if (hasChildren(p.id)) {
+    const from = minPrice(p.id);
+    return `<div class="prow" onclick="openFolder(${p.id})">
+      ${img}
+      <div class="pinfo">
+        <b>${esc(p.name)}</b>
+        ${p.description ? `<div class="muted">${esc(p.description)}</div>` : ''}
+        <div class="price">${from != null ? 'от ' + from + ' ₽' : ''}</div>
+      </div>
+      <div class="pgo">›</div>
+    </div>`;
+  }
+
   const qty = qtyIn(view.shopId, p.id);
-  return `<div class="card">
-    <b>${esc(p.name)}</b>
-    ${p.description ? `<div class="muted">${esc(p.description)}</div>` : ''}
-    ${p.image_url ? `<img class="photo" src="${esc(p.image_url)}" alt="">` : ''}
-    <div class="price">${p.price_rub} ₽</div>
-    ${qty
+  const priceText = p.price_rub != null ? p.price_rub + ' ₽' : 'цена не указана';
+  let action = '';
+  if (p.price_rub != null) {
+    action = qty
       ? `<div class="qty">
            <button onclick="changeQty(${view.shopId}, ${p.id}, -1)">−</button>
            <span>${qty}</span>
            <button onclick="changeQty(${view.shopId}, ${p.id}, 1)">+</button>
          </div>`
-      : `<button class="add" onclick="addToCart(${p.id})">В корзину</button>`}
+      : `<button class="addsmall" onclick="addToCart(${p.id})">+</button>`;
+  }
+  return `<div class="prow">
+    ${img}
+    <div class="pinfo">
+      <b>${esc(p.name)}</b>
+      ${p.description ? `<div class="muted">${esc(p.description)}</div>` : ''}
+      <div class="price">${priceText}</div>
+    </div>
+    <div class="paction">${action}</div>
   </div>`;
 }
 
