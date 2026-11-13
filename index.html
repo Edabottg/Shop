@@ -54,7 +54,7 @@
   .prow { display: flex; align-items: center; gap: 10px; padding: 8px; margin: 6px 0;
           border-radius: 12px; background: var(--tg-theme-secondary-bg-color, #f1f1f1); cursor: pointer; }
   .pthumb { width: 88px; height: 88px; object-fit: cover; border-radius: 10px; flex-shrink: 0;
-            background: #ddd; display: block; margin: 0; }
+            background: #ddd; display: block; margin: 0; cursor: zoom-in; }
   .pinfo { flex: 1; min-width: 0; }
   .pinfo b { font-size: 15px; }
   .pinfo .muted { font-size: 12px; margin-top: 2px; }
@@ -67,12 +67,15 @@
   .prow .qty button { width: 34px; height: 34px; font-size: 18px; }
   .prow .qty span { font-size: 15px; min-width: 18px; }
   .cartbar { position: fixed; left: 12px; right: 120px; bottom: 14px; padding: 14px; border-radius: 12px;
-             text-align: center; font-weight: bold; cursor: pointer;
+             text-align: center; font-weight: bold; cursor: pointer; z-index: 5;
              background: var(--tg-theme-button-color, #2481cc); color: var(--tg-theme-button-text-color, #fff); }
-  .fback { position: fixed; right: 14px; bottom: 14px; z-index: 10; display: none; padding: 12px 18px;
+  .fback { position: fixed; right: 14px; bottom: 70px; z-index: 10; display: none; padding: 12px 18px;
            border: none; border-radius: 24px; font-size: 15px; font-weight: bold; cursor: pointer;
            background: var(--fback-bg); color: var(--fback-color);
            box-shadow: 0 6px 18px rgba(0,0,0,.25); }
+  .lb { position: fixed; inset: 0; z-index: 100; display: none; align-items: center; justify-content: center;
+        padding: 16px; background: rgba(0,0,0,.92); cursor: zoom-out; }
+  .lb img { max-width: 100%; max-height: 100%; border-radius: 12px; }
   .form label { display: block; margin: 12px 0; font-size: 14px; }
   .form input, .form select, .form textarea { width: 100%; box-sizing: border-box; padding: 10px;
     margin-top: 4px; font-size: 16px; border-radius: 8px; border: 1px solid #ccc; }
@@ -83,6 +86,7 @@
 <body>
 <div id="app"><p class="muted loading">Загрузка...</p></div>
 <button id="fback" class="fback" onclick="goBackPage()">← Назад</button>
+<div id="lightbox" class="lb" onclick="closePhoto()"><img id="lbImg" alt=""></div>
 
 <script>
 const SUPABASE_URL = 'https://uwafdyrpyrcnjliwystd.supabase.co';
@@ -98,19 +102,28 @@ tg?.expand();
 const app = document.getElementById('app');
 const fbtn = document.getElementById('fback');
 
-let screen = 'cities';      // текущий экран
+let screen = 'cities';
 let currentCityId = null;
 let citiesCache = [];
 let shopsCache = [];
 let bottomList = [];
-let view = null;            // {shopId, shopName, fee, products, query, parentId, path}
+let view = null;
 let formData = null;
 let lastDoneHtml = '';
-let hist = [];              // история экранов для кнопки «Назад»
+let hist = [];
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c =>
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ---------- Фото блюда на весь экран ----------
+function openPhoto(src) {
+  document.getElementById('lbImg').src = src;
+  document.getElementById('lightbox').style.display = 'flex';
+}
+function closePhoto() {
+  document.getElementById('lightbox').style.display = 'none';
 }
 
 function showLoading() {
@@ -436,7 +449,7 @@ function renderList() {
 
 function productRow(p) {
   const img = p.image_url
-    ? `<img class="pthumb" src="${esc(p.image_url)}" alt="">`
+    ? `<img class="pthumb" src="${esc(p.image_url)}" alt="" onclick="event.stopPropagation(); openPhoto(this.src)">`
     : '<div class="pthumb"></div>';
 
   if (hasChildren(p.id)) {
